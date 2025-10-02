@@ -1,3 +1,4 @@
+// test: dette er en kommentar i TTS route
 // Test commit for TTS route
 import { NextRequest, NextResponse } from "next/server";
 import { NextRequest, NextResponse } from "next/server";
