@@ -6,6 +6,21 @@ import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
 import { generateUUID } from "@/lib/utils";
 import { auth } from "../(auth)/auth";
 
+import TTSButtons from "./TTSButtons";
+
+export default function ChatPage() {
+  return (
+    <main className="p-4">
+      <h1 className="text-xl font-bold">Chat med Kim Agent</h1>
+
+      {/* Her kommer din eksisterende chat-komponent */}
+
+      {/* Og her tilføjer vi TTS-knapperne */}
+      <TTSButtons />
+    </main>
+  );
+}
+
 export default async function Page() {
   const session = await auth();
 
