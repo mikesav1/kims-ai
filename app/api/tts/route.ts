@@ -5,65 +5,44 @@ export const runtime = "edge";
 export async function POST(req: NextRequest) {
   try {
     const { text } = await req.json();
-    if (!text || typeof text !== "string") {
-      return new NextResponse("Missing text", { status: 400 });
-    }
 
-    const apiKey = process.env.ELEVEN_API_KEY!;
-    const voiceId = process.env.ELEVEN_VOICE_ID!;
-    const modelId = process.env.ELEVEN_MODEL_ID || "eleven_multilingual_v2";
+    const apiKey = process.env.ELEVEN_API_KEY;   // husk at sætte i Vercel env
+    const voiceId = process.env.ELEVEN_VOICE_ID; // din "Kim Vase" voice ID
 
-    if (!apiKey || !voiceId) {
-      return new NextResponse("Missing ELEVEN_API_KEY or ELEVEN_VOICE_ID", { status: 500 });
-    }
-
-    // let “prep” for naturlige pauser
-    const prepared = text
-      .replace(/(\S)\s*([.?!])/g, "$1$2 ")
-      .replace(/,\s*/g, ", ... ")
-      .slice(0, 5000);
-
-    const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`;
-
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: {
-        "xi-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        text: prepared,
-        model_id: modelId,
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.85,
-          style: 0.3,
-          use_speaker_boost: true,
+    const ttsRes = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKey!,
+          "Content-Type": "application/json",
         },
-        optimize_streaming_latency: 2,
-        output_format: "mp3_44100_128",
-      }),
-    });
+        body: JSON.stringify({
+          text,
+          model_id: "eleven_multilingual_v2",
+          voice_settings: { stability: 0.5, similarity_boost: 0.8 },
+        }),
+      }
+    );
 
-    if (!resp.ok || !resp.body) {
-      const errText = await resp.text().catch(() => "no body");
-      return new NextResponse(`TTS error: ${errText}`, { status: 500 });
+    if (!ttsRes.ok) {
+      const errText = await ttsRes.text();
+      return NextResponse.json({ ok: false, error: errText }, { status: 400 });
     }
 
-    // stream MP3 tilbage
-    return new NextResponse(resp.body, {
+    const audioBuffer = await ttsRes.arrayBuffer();
+
+    return new NextResponse(audioBuffer, {
       status: 200,
       headers: {
         "Content-Type": "audio/mpeg",
-        "Cache-Control": "no-store",
+        "Cache-Control": "no-cache",
       },
     });
   } catch (e: any) {
-    return new NextResponse(`TTS exception: ${e?.message || e}`, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: e?.message || "unknown" },
+      { status: 500 }
+    );
   }
-}
-
-// valgfrit GET til hurtig “lever ruten?”-test
-export async function GET() {
-  return NextResponse.json({ ok: true, route: "/api/tts" });
 }
