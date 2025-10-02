@@ -8,7 +8,6 @@ import { auth } from "../(auth)/auth";
 
 import TTSButtons from "./TTSButtons";
 
-
 export default async function Page() {
   const session = await auth();
 
@@ -24,6 +23,7 @@ export default async function Page() {
   if (!modelIdFromCookie) {
     return (
       <>
+        <h1 className="text-xl font-bold">Chat med Kim Agent</h1>
         <Chat
           autoResume={false}
           id={id}
@@ -34,12 +34,15 @@ export default async function Page() {
           key={id}
         />
         <DataStreamHandler />
+        {/* Tilføj TTS knapper */}
+        <TTSButtons />
       </>
     );
   }
 
   return (
     <>
+      <h1 className="text-xl font-bold">Chat med Kim Agent</h1>
       <Chat
         autoResume={false}
         id={id}
@@ -50,6 +53,8 @@ export default async function Page() {
         key={id}
       />
       <DataStreamHandler />
+      {/* Tilføj TTS knapper */}
+      <TTSButtons />
     </>
   );
 }
