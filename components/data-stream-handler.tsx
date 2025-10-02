@@ -11,6 +11,9 @@ export function DataStreamHandler() {
   const { artifact, setArtifact, setMetadata } = useArtifact();
   const lastProcessedIndex = useRef(-1);
 
+  // 👇 NYT: husk forrige status så vi kan se, når "streaming" -> "idle"
+  const prevStatus = useRef<string | undefined>(artifact?.status);
+
   useEffect(() => {
     if (!dataStream?.length) {
       return;
@@ -79,6 +82,28 @@ export function DataStreamHandler() {
       });
     }
   }, [dataStream, setArtifact, setMetadata, artifact]);
+
+  // 👇 NYT: når artefakten går fra "streaming" -> "idle", emit endelig tekst
+  useEffect(() => {
+    const current = artifact?.status;
+    const prev = prevStatus.current;
+
+    // overgang fra streaming -> idle = svar er færdigt
+    if (prev !== "idle" && current === "idle") {
+      const text =
+        (artifact as any)?.content?.toString?.() ??
+        (artifact as any)?.content ??
+        "";
+
+      if (text && typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("assistant:final", { detail: { text } })
+        );
+      }
+    }
+
+    prevStatus.current = current;
+  }, [artifact?.status, artifact?.content]); // lyt på status + content
 
   return null;
 }
