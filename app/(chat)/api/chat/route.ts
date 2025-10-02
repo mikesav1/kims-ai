@@ -53,10 +53,7 @@ const getTokenlensCatalog = cache(
     try {
       return await fetchModels();
     } catch (err) {
-      console.warn(
-        "TokenLens: catalog fetch failed, using default catalog",
-        err
-      );
+      console.warn("TokenLens: catalog fetch failed, using default catalog", err);
       return; // tokenlens helpers will fall back to defaultCatalog
     }
   },
@@ -72,9 +69,7 @@ export function getStreamContext() {
       });
     } catch (error: any) {
       if (error.message.includes("REDIS_URL")) {
-        console.log(
-          " > Resumable streams are disabled due to missing REDIS_URL"
-        );
+        console.log(" > Resumable streams are disabled due to missing REDIS_URL");
       } else {
         console.error(error);
       }
@@ -85,6 +80,24 @@ export function getStreamContext() {
 }
 
 export async function POST(request: Request) {
+  // ---------- DEBUG-MODE ----------
+  // Kald fx:  POST /api/chat?mode=json  med body: { "message": "ping" }
+  const url = new URL(request.url);
+  if (url.searchParams.get("mode") === "json") {
+    let anyBody: any = {};
+    try {
+      anyBody = await request.json(); // prøv at læse body uanset format
+    } catch (_) {}
+    return Response.json(
+      {
+        reply: `Echo: ${anyBody?.message ?? "ingen besked"}`,
+        received: anyBody,
+      },
+      { status: 200 }
+    );
+  }
+  // ---------- /DEBUG-MODE ----------
+
   let requestBody: PostRequestBody;
 
   try {
@@ -183,12 +196,7 @@ export async function POST(request: Request) {
           experimental_activeTools:
             selectedChatModel === "chat-model-reasoning"
               ? []
-              : [
-                  "getWeather",
-                  "createDocument",
-                  "updateDocument",
-                  "requestSuggestions",
-                ],
+              : ["getWeather", "createDocument", "updateDocument", "requestSuggestions"],
           experimental_transform: smoothStream({ chunking: "word" }),
           tools: {
             getWeather,
@@ -206,23 +214,11 @@ export async function POST(request: Request) {
           onFinish: async ({ usage }) => {
             try {
               const providers = await getTokenlensCatalog();
-              const modelId =
-                myProvider.languageModel(selectedChatModel).modelId;
-              if (!modelId) {
-                finalMergedUsage = usage;
-                dataStream.write({
-                  type: "data-usage",
-                  data: finalMergedUsage,
-                });
-                return;
-              }
+              const modelId = myProvider.languageModel(selectedChatModel).modelId;
 
-              if (!providers) {
+              if (!modelId || !providers) {
                 finalMergedUsage = usage;
-                dataStream.write({
-                  type: "data-usage",
-                  data: finalMergedUsage,
-                });
+                dataStream.write({ type: "data-usage", data: finalMergedUsage });
                 return;
               }
 
@@ -275,7 +271,6 @@ export async function POST(request: Request) {
     });
 
     // const streamContext = getStreamContext();
-
     // if (streamContext) {
     //   return new Response(
     //     await streamContext.resumableStream(streamId, () =>
@@ -321,7 +316,7 @@ export async function DELETE(request: Request) {
     return new ChatSDKError("unauthorized:chat").toResponse();
   }
 
- const chat = await getChatById({ id });
+  const chat = await getChatById({ id });
 
   if (chat?.userId !== session.user.id) {
     return new ChatSDKError("forbidden:chat").toResponse();
