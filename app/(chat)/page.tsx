@@ -7,6 +7,7 @@ import { generateUUID } from "@/lib/utils";
 import { auth } from "../(auth)/auth";
 
 import TTSButtons from "./TTSButtons";
+import AutoSpeak from "./AutoSpeak";
 
 export default async function Page() {
   const session = await auth();
@@ -23,7 +24,6 @@ export default async function Page() {
   if (!modelIdFromCookie) {
     return (
       <>
-        <h1 className="text-xl font-bold">Chat med Kim Agent</h1>
         <Chat
           autoResume={false}
           id={id}
@@ -34,15 +34,18 @@ export default async function Page() {
           key={id}
         />
         <DataStreamHandler />
-        {/* Tilføj TTS knapper */}
-        <TTSButtons />
+
+        {/* TTS UI */}
+        <div className="mt-4 space-y-3">
+          <TTSButtons />
+          <AutoSpeak />
+        </div>
       </>
     );
   }
 
   return (
     <>
-      <h1 className="text-xl font-bold">Chat med Kim Agent</h1>
       <Chat
         autoResume={false}
         id={id}
@@ -53,8 +56,12 @@ export default async function Page() {
         key={id}
       />
       <DataStreamHandler />
-      {/* Tilføj TTS knapper */}
-      <TTSButtons />
+
+      {/* TTS UI */}
+      <div className="mt-4 space-y-3">
+        <TTSButtons />
+        <AutoSpeak />
+      </div>
     </>
   );
 }
