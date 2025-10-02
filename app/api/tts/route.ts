@@ -1,45 +1,41 @@
-// app/api/tts/route.ts
 import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
   try {
     const { text } = await req.json();
 
-    if (!text) {
-      return NextResponse.json({ error: "No text provided" }, { status: 400 });
-    }
-
-    // 👉 kald ElevenLabs API (her skal du indsætte din API-key i .env)
-    const r = await fetch("https://api.elevenlabs.io/v1/text-to-speech/YOUR_VOICE_ID", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "xi-api-key": process.env.ELEVEN_API_KEY as string,
-      },
-      body: JSON.stringify({
-        text,
-        model_id: "eleven_multilingual_v2",
-        voice_settings: {
-          stability: 0.4,
-          similarity_boost: 0.8,
+    const r = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${process.env.ELEVEN_VOICE_ID}`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": process.env.ELEVEN_API_KEY || "",
+          "Content-Type": "application/json",
         },
-      }),
-    });
+        body: JSON.stringify({
+          text,
+          model_id: process.env.ELEVEN_MODEL_ID || "eleven_multilingual_v2",
+        }),
+      }
+    );
 
     if (!r.ok) {
-      const err = await r.text();
-      return NextResponse.json({ error: err }, { status: 500 });
+      const error = await r.text();
+      return NextResponse.json({ error }, { status: 500 });
     }
 
-    // ElevenLabs returnerer en lydfil som binary → send videre
-    const audio = await r.arrayBuffer();
+    const arrayBuffer = await r.arrayBuffer();
 
-    return new NextResponse(audio, {
+    return new Response(Buffer.from(arrayBuffer), {
+      status: 200,
       headers: {
         "Content-Type": "audio/mpeg",
       },
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json(
+      { error: err.message || "Unknown error" },
+      { status: 500 }
+    );
   }
 }
