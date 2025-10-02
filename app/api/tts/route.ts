@@ -1,9 +1,10 @@
-// test: dette er en kommentar i TTS route
-// Test commit for TTS route
-import { NextRequest, NextResponse } from "next/server";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "edge";
+
+export async function GET() {
+  return NextResponse.json({ ok: true, route: "/api/tts" });
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,9 +13,9 @@ export async function POST(req: NextRequest) {
       return new NextResponse("Missing text", { status: 400 });
     }
 
-    const apiKey = process.env.ELEVEN_API_KEY!;
-    const voiceId = process.env.ELEVEN_VOICE_ID!;
-    const modelId = process.env.ELEVEN_MODEL_ID || "eleven_multilingual_v2";
+    const apiKey  = process.env.ELEVEN_API_KEY;
+    const voiceId = process.env.ELEVEN_VOICE_ID;
+    const modelId = process.env.ELEVEN_MODEL_ID ?? "eleven_multilingual_v2";
 
     if (!apiKey || !voiceId) {
       return new NextResponse("Missing ELEVEN_API_KEY or ELEVEN_VOICE_ID", { status: 500 });
@@ -27,7 +28,10 @@ export async function POST(req: NextRequest) {
 
     const resp = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`, {
       method: "POST",
-      headers: { "xi-api-key": apiKey, "Content-Type": "application/json" },
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
         text: prepared,
         model_id: modelId,
@@ -38,8 +42,8 @@ export async function POST(req: NextRequest) {
     });
 
     if (!resp.ok || !resp.body) {
-      const errText = await resp.text().catch(() => "no body");
-      return new NextResponse(`TTS error: ${errText}`, { status: 500 });
+      const err = await resp.text().catch(() => "no body");
+      return new NextResponse(`TTS error: ${err}`, { status: 500 });
     }
 
     return new NextResponse(resp.body, {
@@ -49,8 +53,4 @@ export async function POST(req: NextRequest) {
   } catch (e: any) {
     return new NextResponse(`TTS exception: ${e?.message || e}`, { status: 500 });
   }
-}
-
-export async function GET() {
-  return NextResponse.json({ ok: true, route: "/api/tts" });
 }
