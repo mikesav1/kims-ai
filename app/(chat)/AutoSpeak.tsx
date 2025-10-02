@@ -1,57 +1,41 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { playTTS } from "@/lib/play-tts-client";
 
 export default function AutoSpeak() {
-  const [enabled, setEnabled] = useState(false);
+  const [enabled, setEnabled] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("tts:auto") === "1";
+  });
 
-  // Hent tidligere bruger-valg fra localStorage
   useEffect(() => {
-    const stored = localStorage.getItem("autoSpeakEnabled");
-    if (stored === "true") {
-      setEnabled(true);
-    }
-  }, []);
+    const handler = (e: Event) => {
+      if (!enabled) return;
+      const { text } = (e as CustomEvent<{ text: string }>).detail || { text: "" };
+      if (!text?.trim()) return;
 
-  // Lyt efter custom event fra DataStreamHandler
-  useEffect(() => {
-    if (!enabled) return;
-
-    const handleSpeak = (event: Event) => {
-      const customEvent = event as CustomEvent<string>;
-      const text = customEvent.detail;
-
-      // kald TTS-endpointet
-      fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      })
-        .then((res) => res.blob())
-        .then((blob) => {
-          const url = URL.createObjectURL(blob);
-          const audio = new Audio(url);
-          audio.play();
-        })
-        .catch((err) => console.error("TTS fejl:", err));
+      console.log("[AutoSpeak] final text:", text.slice(0, 120) + (text.length > 120 ? "…" : ""));
+      playTTS(text.trim());
     };
 
-    window.addEventListener("tts:speak", handleSpeak);
-    return () => window.removeEventListener("tts:speak", handleSpeak);
+    // 👈 matcher DataStreamHandler
+    window.addEventListener("assistant:final", handler as EventListener);
+    return () => window.removeEventListener("assistant:final", handler as EventListener);
   }, [enabled]);
 
-  const toggle = () => {
-    const newValue = !enabled;
-    setEnabled(newValue);
-    localStorage.setItem("autoSpeakEnabled", newValue.toString());
-  };
-
   return (
-    <div className="my-2">
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input type="checkbox" checked={enabled} onChange={toggle} />
-        <span>Læs automatisk svar op</span>
-      </label>
-    </div>
+    <label className="flex items-center gap-2 text-sm mt-2">
+      <input
+        type="checkbox"
+        checked={enabled}
+        onChange={(e) => {
+          const v = e.target.checked;
+          setEnabled(v);
+          localStorage.setItem("tts:auto", v ? "1" : "0");
+        }}
+      />
+      Læs svar højt automatisk
+    </label>
   );
 }
