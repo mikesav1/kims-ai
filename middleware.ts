@@ -7,9 +7,24 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   /*
+   * ➜ Debug: log alle kald ind i middleware
+   */
+  console.log("➡ Middleware ramte:", pathname);
+
+  /*
    * ➜ Bypass auth for API-chat endpoint (så curl kan ramme direkte)
    */
   if (pathname.startsWith("/api/chat")) {
+    // Tjek også at OPENAI_API_KEY findes
+    if (!process.env.OPENAI_API_KEY) {
+      console.error("❌ OPENAI_API_KEY mangler i miljøvariabler!");
+      return NextResponse.json(
+        { error: "Server fejl: OPENAI_API_KEY er ikke sat" },
+        { status: 500 }
+      );
+    }
+
+    console.log("✅ Middleware: /api/chat kører, API key er sat");
     return NextResponse.next();
   }
 
