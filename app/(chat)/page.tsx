@@ -7,7 +7,7 @@ import { generateUUID } from "@/lib/utils";
 import { auth } from "../(auth)/auth";
 
 import TTSButtons from "./TTSButtons";
-import AutoSpeak from "./AutoSpeak";
+import AutoSpeakObserver from "./AutoSpeakObserver"; // <<— this matches the file we created
 
 export default async function Page() {
   const session = await auth();
@@ -38,7 +38,7 @@ export default async function Page() {
         {/* TTS UI */}
         <div className="mt-4 space-y-3">
           <TTSButtons />
-          <AutoSpeak />
+          <AutoSpeakObserver />
         </div>
       </>
     );
@@ -60,7 +60,7 @@ export default async function Page() {
       {/* TTS UI */}
       <div className="mt-4 space-y-3">
         <TTSButtons />
-        <AutoSpeak />
+        <AutoSpeakObserver />
       </div>
     </>
   );
