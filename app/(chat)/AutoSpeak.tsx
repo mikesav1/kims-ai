@@ -1,3 +1,6 @@
+useEffect(() => {
+  console.log("[AutoSpeak] mounted");
+}, []);
 "use client";
 
 import { useEffect, useState } from "react";
