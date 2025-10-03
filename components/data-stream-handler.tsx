@@ -4,15 +4,17 @@ import { useEffect, useRef } from "react";
 import { useDataStream } from "./data-stream-provider";
 
 /**
- * This handler only OBSERVES dataStream and dispatches an event when the
- * assistant message is done. No artifact typing or status juggling.
+ * Observerer kun dataStream og udsender 'assistant:final' med den samlede tekst,
+ * når en assistent-svar er færdigt. Rører ikke ved artifact-typerne.
  */
 export function DataStreamHandler() {
   const { dataStream } = useDataStream();
 
-  // keep a buffer for the current assistant message
+  // buffer for nuværende assistent-svar
   const bufferRef = useRef<string>("");
-  // process only new deltas each render
+  // track om vi er i gang med at modtage et svar
+  const inProgressRef = useRef<boolean>(false);
+  // behandl kun nye deltas
   const lastIndexRef = useRef<number>(-1);
 
   useEffect(() => {
@@ -23,35 +25,30 @@ export function DataStreamHandler() {
     lastIndexRef.current = dataStream.length - 1;
 
     for (const delta of newDeltas) {
-      // Debug: see exactly what your stream emits
-      // Open DevTools console and watch these logs
+      // debug i konsollen—se præcis hvad dit setup sender
       console.log("Δ", delta?.type, delta);
 
-      // If a new assistant message begins, clear buffer
-      // Many templates send a "role" delta; keep this generic & safe
-      if (delta?.type === "role" && (delta as any)?.data === "assistant") {
-        bufferRef.current = "";
-        continue;
+      const t = String(delta?.type || "").toLowerCase();
+
+      // Hent tekst-chunk på tværs af typiske felter
+      const any = delta as any;
+      let chunk = "";
+      if (typeof any.textDelta === "string") chunk = any.textDelta;
+      else if (typeof any.delta === "string") chunk = any.delta;
+      else if (typeof any.text === "string") chunk = any.text;
+      else if (typeof any.data === "string") chunk = any.data;
+      else if (typeof any.content === "string") chunk = any.content;
+
+      // Hvis vi modtager tekst og ikke var i gang, så starter vi implicit en ny buffer
+      if (chunk) {
+        if (!inProgressRef.current) {
+          bufferRef.current = "";
+          inProgressRef.current = true;
+        }
+        bufferRef.current += chunk;
       }
 
-      // Try to pick up text chunks across common delta shapes:
-      // adjust as we learn what your template emits from the console logs.
-      const asAny = delta as any;
-      const maybeTextChunk =
-        asAny.textDelta ??
-        asAny.delta ??
-        asAny.text ??
-        asAny.data ??
-        asAny.content ??
-        "";
-
-      if (typeof maybeTextChunk === "string" && maybeTextChunk) {
-        bufferRef.current += maybeTextChunk;
-      }
-
-      // When the assistant finishes, templates usually emit some *finish* delta.
-      // Catch several common variants:
-      const t = (delta?.type || "").toString().toLowerCase();
+      // Slut-delta? match flere almindelige varianter
       const looksFinished =
         t.includes("finish") ||
         t === "message-finish" ||
@@ -61,12 +58,12 @@ export function DataStreamHandler() {
       if (looksFinished) {
         const text = bufferRef.current.trim();
         if (text) {
-          // Fire the event our AutoSpeak listens to
           window.dispatchEvent(
             new CustomEvent("assistant:final", { detail: { text } })
           );
         }
         bufferRef.current = "";
+        inProgressRef.current = false;
       }
     }
   }, [dataStream]);
