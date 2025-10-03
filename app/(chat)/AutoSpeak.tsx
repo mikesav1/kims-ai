@@ -1,80 +1,88 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 
 export default function AutoSpeak() {
-  const [enabled, setEnabled] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem("tts:auto") === "1";
-  });
+  const [enabled, setEnabled] = useState(true);
+  const [testing, setTesting] = useState(false);
 
-  // Kald TTS-endpointet og afspil
-  const speak = useCallback(async (text: string) => {
+  // central speak => sender til /api/tts og afspiller
+  const speak = async (text: string) => {
     try {
-      console.log("[AutoSpeak] fetch /api/tts with:", text.slice(0, 120) + (text.length > 120 ? "…" : ""));
+      console.log("[AutoSpeak] speak() -> POST /api/tts, len:", text.length);
       const res = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
-
       if (!res.ok) {
-        const err = await res.text();
-        console.error("[AutoSpeak] /api/tts error:", res.status, err);
+        console.error("[AutoSpeak] TTS HTTP error", res.status);
         return;
       }
-
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       await audio.play();
-      console.log("[AutoSpeak] audio started");
+      console.log("[AutoSpeak] playing audio ok");
     } catch (e) {
-      console.error("[AutoSpeak] play error:", e);
+      console.error("[AutoSpeak] speak() failed", e);
     }
-  }, []);
+  };
 
-  // Event listener
+  // Hør eventet fra DataStreamHandler
   useEffect(() => {
-    const handler = (e: Event) => {
-      if (!enabled) {
-        console.log("[AutoSpeak] event ignored (disabled)");
-        return;
-      }
-      const detail = (e as CustomEvent<{ text?: string }>).detail;
-      const text = detail?.text ?? "";
-      console.log("[AutoSpeak] assistant:final received. Text len:", text.length);
-      if (text.trim()) speak(text.trim());
+    console.log("[AutoSpeak] mounted");
+
+    const onFinal = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail as { text?: string } | undefined;
+      const text = detail?.text || "";
+      console.log("[AutoSpeak] assistant:final event received, len:", text.length, "enabled:", enabled);
+      if (!enabled || !text) return;
+      speak(text);
     };
 
-    // 👇 SKAL matche DataStreamHandler
-    window.addEventListener("assistant:final", handler as EventListener);
-    return () => window.removeEventListener("assistant:final", handler as EventListener);
-  }, [enabled, speak]);
+    window.addEventListener("assistant:final", onFinal);
+    return () => {
+      window.removeEventListener("assistant:final", onFinal);
+    };
+  }, [enabled]);
+
+  const testNow = async () => {
+    setTesting(true);
+    await speak("Test — dette er AutoSpeak der læser op fra ElevenLabs.");
+    setTesting(false);
+  };
 
   return (
-    <div className="mt-2 flex items-center gap-4">
-      <label className="flex items-center gap-2 text-sm">
+    <div className="flex items-center gap-3">
+      <label className="flex items-center gap-2">
         <input
           type="checkbox"
           checked={enabled}
-          onChange={(e) => {
-            const v = e.target.checked;
-            setEnabled(v);
-            localStorage.setItem("tts:auto", v ? "1" : "0");
-            console.log("[AutoSpeak] enabled:", v);
-          }}
+          onChange={(e) => setEnabled(e.target.checked)}
         />
         Læs svar højt automatisk
       </label>
 
       <button
-        type="button"
-        className="px-2 py-1 border rounded text-sm"
-        onClick={() => speak("Test: Kim-agenten læser dette højt.")}
-        title="Afspil test-lyd"
+        onClick={testNow}
+        disabled={testing}
+        className="rounded bg-neutral-200 px-3 py-1 text-sm dark:bg-neutral-700"
       >
-        Test oplæsning
+        {testing ? "Tester…" : "Test oplæsning"}
+      </button>
+
+      <button
+        onClick={() =>
+          window.dispatchEvent(
+            new CustomEvent("assistant:final", {
+              detail: { text: "Simuleret event: AutoSpeak bør læse dette op." },
+            })
+          )
+        }
+        className="rounded bg-neutral-200 px-3 py-1 text-sm dark:bg-neutral-700"
+      >
+        Simulér event
       </button>
     </div>
   );
