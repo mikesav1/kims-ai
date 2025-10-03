@@ -1,88 +1,56 @@
+// app/(chat)/AutoSpeakObserver.tsx
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
-function scrubAssistantText(input: string): string {
-  let t = input ?? "";
+const DENYLIST = [
+  "copy", "kopy", "upload", "response", "thumb", "like", "dislike",
+  "share", "download", "open in new", "open in gmail",
+];
 
-  // Fjern emojis/ikon-UI
-  t = t.replace(/[👍👎📎🔊🎤📤📥💬🗒️⭐️]/g, " ");
+function isReadable(text: string): boolean {
+  const t = (text || "").trim();
 
-  // Fjern typiske UI-etiketter (DK/EN) som kan snige sig med i strengen
-  const uiWords = new Set(
-    [
-      "kopi", "kopier", "kopiér", "copy",
-      "upload", "download", "del", "share",
-      "like", "dislike", "thumbs up", "thumbs down",
-      "svar", "send", "besked", "skriv en besked",
-      "response", "respone", "respond", "reply",
-      "test oplæsning", "30 sek pitch", "90 sek pitch", "hvem er kim?",
-    ].map((s) => s.toLowerCase())
-  );
+  // for kort -> sandsynligvis knap/label
+  if (t.length < 20) return false;
 
-  // Linje-for-linje rens:
-  t = t
-    .split(/\r?\n+/)
-    .map((line) => line.trim())
-    .filter((line) => {
-      const k = line.toLowerCase();
+  const lc = t.toLowerCase();
 
-      // Smid helt tomme linjer
-      if (!k) return false;
+  // klassiske UI-ord
+  if (DENYLIST.some(w => lc.includes(w))) return false;
 
-      // Smid meget korte "UI-agtige" linjer
-      if (k.length <= 2) return false;
+  // rene links/URL’er
+  if (/^(https?:\/\/|www\.)/i.test(t)) return false;
 
-      // Fjern linjer der *kun* består af "UI-ord"
-      if (uiWords.has(k)) return false;
+  // heuristik: engelske onboarding-sætninger uden danske specialtegn
+  if (/(click|button|press|upload|drag|drop|you can|try|examples)/i.test(t) && !/[æøå]/i.test(t)) {
+    return false;
+  }
 
-      // Fjern linjer der starter med typiske UI-tekster
-      if (/^(kopi(ér|er)?|copy|upload|download|del|share|svar|send|response|respone|like|dislike)\b/i.test(k)) {
-        return false;
-      }
-
-      // Fjern de auto-knapper vi har tilføjet
-      if (/^(30 sek pitch|90 sek pitch|hvem er kim\?)$/i.test(k)) return false;
-
-      return true;
-    })
-    .join("\n");
-
-  // Fjern "code fences" (hvis de skulle dukke op)
-  t = t.replace(/```[\s\S]*?```/g, "");
-
-  // Komprimer whitespace
-  t = t.replace(/\s{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
-
-  return t;
+  return true;
 }
 
 export default function AutoSpeakObserver() {
-  const lastSpokenRef = useRef<string>("");           // deduplikér sidste udsendte
-  const playingRef = useRef<HTMLAudioElement | null>(null);
-
   useEffect(() => {
+    let currentAudio: HTMLAudioElement | null = null;
+
     const onFinal = async (e: any) => {
-      const rawText: string | undefined = e?.detail?.text;
-      if (!rawText) return;
+      const text: string | undefined = e?.detail?.text;
+      if (!text) return;
 
-      // Sanér/filtrér
-      const text = scrubAssistantText(rawText);
-
-      // Hvis der kun er UI tilbage → ikke tal det
-      if (!text || text.length < 5) return;
-
-      // Deduplikér (undgå at læse samme svar to gange)
-      if (text === lastSpokenRef.current) return;
-      lastSpokenRef.current = text;
-
-      // Stop igangværende afspilning (hvis bruger skynder sig)
-      try {
-        playingRef.current?.pause?.();
-        playingRef.current = null;
-      } catch {}
+      // læs kun “rigtige” svar
+      if (!isReadable(text)) {
+        // console.log("[AutoSpeak] filtreret fra:", text);
+        return;
+      }
 
       try {
+        // stop evt igangværende afspilning
+        try {
+          currentAudio?.pause();
+          currentAudio = null;
+        } catch {}
+
         const r = await fetch("/api/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -98,23 +66,17 @@ export default function AutoSpeakObserver() {
         const blob = new Blob([ab], { type: "audio/mpeg" });
         const url = URL.createObjectURL(blob);
         const a = new Audio(url);
-        playingRef.current = a;
+        currentAudio = a;
 
-        await a.play();
-        console.log("[AutoSpeak] Afspilning startet.");
+        a.play().catch(err => console.error("[AutoSpeak] play error:", err));
+        // console.log("[AutoSpeak] Afspilning startet.");
       } catch (err) {
         console.error("[AutoSpeak] TTS error:", err);
       }
     };
 
     window.addEventListener("assistant:final", onFinal);
-    return () => {
-      window.removeEventListener("assistant:final", onFinal);
-      try {
-        playingRef.current?.pause?.();
-      } catch {}
-      playingRef.current = null;
-    };
+    return () => window.removeEventListener("assistant:final", onFinal);
   }, []);
 
   return null;
