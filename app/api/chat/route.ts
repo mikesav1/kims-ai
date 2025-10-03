@@ -9,18 +9,16 @@ export const runtime = "edge";
 export async function POST(req: Request) {
   try {
     const { messages = [] } = await req.json();
-
-    const model = getModel();
+    const model = getModel(); // returnerer din valgte ChatModel
 
     const result = await streamText({
       model,
-      system: KIM_AGENT_SYSTEM,
+      system: KIM_AGENT_SYSTEM, // din danske systemprompt
       messages,
     });
 
-    // ✅ Dette er vigtigt: Brug DataStreamResponse, ikke TextStreamResponse
+    // VIGTIGT: brug text-stream response (den findes i din ai-version)
     return result.toTextStreamResponse();
-
   } catch (err) {
     console.error("[/api/chat] error:", err);
     return NextResponse.json({ error: "Chat server error." }, { status: 500 });
