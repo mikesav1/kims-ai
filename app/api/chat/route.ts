@@ -18,7 +18,9 @@ export async function POST(req: Request) {
       messages,
     });
 
-    return result.toTextStreamResponse();
+    // ✅ Dette er vigtigt: Brug DataStreamResponse, ikke TextStreamResponse
+    return result.toDataStreamResponse();
+
   } catch (err) {
     console.error("[/api/chat] error:", err);
     return NextResponse.json({ error: "Chat server error." }, { status: 500 });
