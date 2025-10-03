@@ -7,7 +7,8 @@ import { generateUUID } from "@/lib/utils";
 import { auth } from "../(auth)/auth";
 
 import TTSButtons from "./TTSButtons";
-import AutoSpeakObserver from "./AutoSpeakObserver"; // <<— this matches the file we created
+import AutoSpeakObserver from "./AutoSpeakObserver"; 
+import AutoSpeakDOM from "./AutoSpeakDOM";   // 👈 NY fallback
 
 export default async function Page() {
   const session = await auth();
@@ -17,52 +18,36 @@ export default async function Page() {
   }
 
   const id = generateUUID();
-
   const cookieStore = await cookies();
   const modelIdFromCookie = cookieStore.get("chat-model");
 
-  if (!modelIdFromCookie) {
-    return (
-      <>
-        <Chat
-          autoResume={false}
-          id={id}
-          initialChatModel={DEFAULT_CHAT_MODEL}
-          initialMessages={[]}
-          initialVisibilityType="private"
-          isReadonly={false}
-          key={id}
-        />
-        <DataStreamHandler />
-
-        {/* TTS UI */}
-        <div className="mt-4 space-y-3">
-          <TTSButtons />
-          <AutoSpeakObserver />
-        </div>
-      </>
-    );
-  }
+  const chatProps = {
+    autoResume: false,
+    id,
+    initialMessages: [],
+    initialVisibilityType: "private" as const,
+    isReadonly: false,
+    key: id,
+  };
 
   return (
     <>
       <Chat
-        autoResume={false}
-        id={id}
-        initialChatModel={modelIdFromCookie.value}
-        initialMessages={[]}
-        initialVisibilityType="private"
-        isReadonly={false}
-        key={id}
+        {...chatProps}
+        initialChatModel={modelIdFromCookie?.value || DEFAULT_CHAT_MODEL}
       />
       <DataStreamHandler />
 
       {/* TTS UI */}
       <div className="mt-4 space-y-3">
         <TTSButtons />
-        <AutoSpeakObserver />
+        <AutoSpeakObserver />   {/* bruger 'assistant:final' event */}
+        <AutoSpeakDOM />        {/* fallback: scanner DOM for sidste assistent-svar */}
       </div>
-      <div className="text-xs opacity-60">AutoSpeak v3 • build check</div>
+
+      <div className="text-xs opacity-60">
+        AutoSpeak v3 • build check
+      </div>
     </>
   );
 }
