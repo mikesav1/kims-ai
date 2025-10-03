@@ -54,56 +54,46 @@ const getTokenlensCatalog = cache(
       return await fetchModels();
     } catch (err) {
       console.warn("TokenLens: catalog fetch failed, using default catalog", err);
-      return; // tokenlens helpers will fall back to defaultCatalog
+      return;
     }
   },
   ["tokenlens-catalog"],
-  { revalidate: 24 * 60 * 60 } // 24 hours
+  { revalidate: 24 * 60 * 60 }
 );
 
 export function getStreamContext() {
   if (!globalStreamContext) {
     try {
-      globalStreamContext = createResumableStreamContext({
-        waitUntil: after,
-      });
+      globalStreamContext = createResumableStreamContext({ waitUntil: after });
     } catch (error: any) {
-      if (error.message.includes("REDIS_URL")) {
+      if (error.message?.includes("REDIS_URL")) {
         console.log(" > Resumable streams are disabled due to missing REDIS_URL");
       } else {
         console.error(error);
       }
     }
   }
-
   return globalStreamContext;
 }
 
 export async function POST(request: Request) {
-  // ---------- DEBUG-MODE ----------
-  // Kald fx:  POST /api/chat?mode=json  med body: { "message": "ping" }
   const url = new URL(request.url);
   if (url.searchParams.get("mode") === "json") {
     let anyBody: any = {};
     try {
-      anyBody = await request.json(); // prøv at læse body uanset format
-    } catch (_) {}
+      anyBody = await request.json();
+    } catch {}
     return Response.json(
-      {
-        reply: `Echo: ${anyBody?.message ?? "ingen besked"}`,
-        received: anyBody,
-      },
+      { reply: `Echo: ${anyBody?.message ?? "ingen besked"}`, received: anyBody },
       { status: 200 }
     );
   }
-  // ---------- /DEBUG-MODE ----------
 
   let requestBody: PostRequestBody;
-
   try {
     const json = await request.json();
     requestBody = postRequestBodySchema.parse(json);
-  } catch (_) {
+  } catch {
     return new ChatSDKError("bad_request:api").toResponse();
   }
 
@@ -121,13 +111,9 @@ export async function POST(request: Request) {
     } = requestBody;
 
     const session = await auth();
-
-    if (!session?.user) {
-      return new ChatSDKError("unauthorized:chat").toResponse();
-    }
+    if (!session?.user) return new ChatSDKError("unauthorized:chat").toResponse();
 
     const userType: UserType = session.user.type;
-
     const messageCount = await getMessageCountByUserId({
       id: session.user.id,
       differenceInHours: 24,
@@ -138,16 +124,12 @@ export async function POST(request: Request) {
     }
 
     const chat = await getChatById({ id });
-
     if (chat) {
       if (chat.userId !== session.user.id) {
         return new ChatSDKError("forbidden:chat").toResponse();
       }
     } else {
-      const title = await generateTitleFromUserMessage({
-        message,
-      });
-
+      const title = await generateTitleFromUserMessage({ message });
       await saveChat({
         id,
         userId: session.user.id,
@@ -160,13 +142,7 @@ export async function POST(request: Request) {
     const uiMessages = [...convertToUIMessages(messagesFromDb), message];
 
     const { longitude, latitude, city, country } = geolocation(request);
-
-    const requestHints: RequestHints = {
-      longitude,
-      latitude,
-      city,
-      country,
-    };
+    const requestHints: RequestHints = { longitude, latitude, city, country };
 
     await saveMessages({
       messages: [
@@ -202,10 +178,7 @@ export async function POST(request: Request) {
             getWeather,
             createDocument: createDocument({ session, dataStream }),
             updateDocument: updateDocument({ session, dataStream }),
-            requestSuggestions: requestSuggestions({
-              session,
-              dataStream,
-            }),
+            requestSuggestions: requestSuggestions({ session, dataStream }),
           },
           experimental_telemetry: {
             isEnabled: isProductionEnvironment,
@@ -233,6 +206,8 @@ export async function POST(request: Request) {
           },
         });
 
+        // VIGTIGT i ai@5: start forbruget af streamet,
+        // og brug UIMessageStream i stedet for de gamle *DataStream* helpers.
         result.consumeStream();
 
         dataStream.merge(
@@ -265,11 +240,10 @@ export async function POST(request: Request) {
           }
         }
       },
-      onError: () => {
-        return "Oops, an error occurred!";
-      },
+      onError: () => "Oops, an error occurred!",
     });
 
+    // Hvis du senere vil aktivere resumable streams via Redis:
     // const streamContext = getStreamContext();
     // if (streamContext) {
     //   return new Response(
@@ -283,11 +257,8 @@ export async function POST(request: Request) {
   } catch (error) {
     const vercelId = request.headers.get("x-vercel-id");
 
-    if (error instanceof ChatSDKError) {
-      return error.toResponse();
-    }
+    if (error instanceof ChatSDKError) return error.toResponse();
 
-    // Check for Vercel AI Gateway credit card error
     if (
       error instanceof Error &&
       error.message?.includes(
@@ -306,23 +277,16 @@ export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
 
-  if (!id) {
-    return new ChatSDKError("bad_request:api").toResponse();
-  }
+  if (!id) return new ChatSDKError("bad_request:api").toResponse();
 
   const session = await auth();
-
-  if (!session?.user) {
-    return new ChatSDKError("unauthorized:chat").toResponse();
-  }
+  if (!session?.user) return new ChatSDKError("unauthorized:chat").toResponse();
 
   const chat = await getChatById({ id });
-
   if (chat?.userId !== session.user.id) {
     return new ChatSDKError("forbidden:chat").toResponse();
   }
 
   const deletedChat = await deleteChatById({ id });
-
   return Response.json(deletedChat, { status: 200 });
 }
