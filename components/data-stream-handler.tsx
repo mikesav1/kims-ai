@@ -1,103 +1,44 @@
-useEffect(() => {
-  console.log("[DSH] mounted");
-}, []);
-
-useEffect(() => {
-  console.log("[DSH] dataStream length:", dataStream?.length ?? 0);
-}, [dataStream]);
 "use client";
 
 import { useEffect, useRef } from "react";
 import { useDataStream } from "./data-stream-provider";
 
 /**
- * Robust stream-handler:
- * - Bufferer tekst fra tekst-deltas (flere felt-navne understøttes)
- * - Udløser 'assistant:final' ved finish-delta ELLER efter inaktivitet (fallback)
- * - Logger alle deltas i konsollen (så vi kan finjustere)
+ * Lytter på dataStream, buffer tekst, og emitter "assistant:final"
+ * med den fulde tekst når LLM-svaret er færdigt.
  */
 export function DataStreamHandler() {
   const { dataStream } = useDataStream();
-
-  // Buffer for igangværende svar
-  const bufferRef = useRef<string>("");
-  const inProgressRef = useRef<boolean>(false);
-  const lastIndexRef = useRef<number>(-1);
-  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Hvor mange ms uden nye tekst-chunks før vi flusher (fallback)
-  const IDLE_MS = 1200;
-
-  const flush = () => {
-    const text = bufferRef.current.trim();
-    if (text) {
-      console.log("[DataStreamHandler] FLUSH -> assistant:final", text.slice(0, 120), "…");
-      window.dispatchEvent(new CustomEvent("assistant:final", { detail: { text } }));
-    }
-    bufferRef.current = "";
-    inProgressRef.current = false;
-  };
-
-  const armIdleTimer = () => {
-    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    idleTimerRef.current = setTimeout(() => {
-      if (inProgressRef.current) {
-        console.log("[DataStreamHandler] idle timeout -> flush");
-        flush();
-      }
-    }, IDLE_MS);
-  };
+  const bufferRef = useRef("");
 
   useEffect(() => {
-    if (!dataStream || dataStream.length === 0) return;
+    if (!dataStream?.length) return;
 
-    const start = lastIndexRef.current + 1;
-    const newDeltas = dataStream.slice(start);
-    lastIndexRef.current = dataStream.length - 1;
+    // Tag kun de nye dele og opdater bufferen
+    const last = dataStream[dataStream.length - 1];
 
-    for (const delta of newDeltas) {
-      console.log("Δ", delta?.type, delta);
+    const t = last?.type;
+    const d = (last as any)?.data;
 
-      const t = String(delta?.type || "").toLowerCase();
-      const any = delta as any;
+    // Tekst-append (navne kan variere mellem templates)
+    if (t === "text-delta" || t === "data-textDelta" || t === "data-text-delta") {
+      if (typeof d === "string") bufferRef.current += d;
+    }
 
-      // Læs tekst fra de mest almindelige felter
-      let chunk = "";
-      if (typeof any.textDelta === "string") chunk = any.textDelta;
-      else if (typeof any.delta === "string") chunk = any.delta;
-      else if (typeof any.text === "string") chunk = any.text;
-      else if (typeof any.data === "string") chunk = any.data;
-      else if (typeof any.content === "string") chunk = any.content;
+    // Start på ny assistant-besked? (ryd buffer)
+    if (t === "role" && d === "assistant") {
+      bufferRef.current = "";
+    }
 
-      if (chunk) {
-        if (!inProgressRef.current) {
-          console.log("[DataStreamHandler] start new buffer");
-          bufferRef.current = "";
-          inProgressRef.current = true;
-        }
-        bufferRef.current += chunk;
-        armIdleTimer();
-      }
-
-      // Slut-signaler – match flere varianter
-      const looksFinished =
-        t.includes("finish") ||
-        t === "message-finish" ||
-        t === "data-finish" ||
-        t === "assistant-finish";
-
-      if (looksFinished) {
-        console.log("[DataStreamHandler] finish delta -> flush");
-        flush();
+    // Slut – emit den samlede tekst
+    if (t === "finish" || t === "data-finish") {
+      const text = bufferRef.current.trim();
+      bufferRef.current = "";
+      if (text && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("assistant:final", { detail: { text } }));
       }
     }
   }, [dataStream]);
-
-  useEffect(() => {
-    return () => {
-      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    };
-  }, []);
 
   return null;
 }
