@@ -62,6 +62,7 @@ export default async function Page() {
         <TTSButtons />
         <AutoSpeakObserver />
       </div>
+      <div className="text-xs opacity-60">AutoSpeak v3 • build check</div>
     </>
   );
 }
