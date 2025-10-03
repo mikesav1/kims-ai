@@ -1,3 +1,10 @@
+useEffect(() => {
+  console.log("[DSH] mounted");
+}, []);
+
+useEffect(() => {
+  console.log("[DSH] dataStream length:", dataStream?.length ?? 0);
+}, [dataStream]);
 "use client";
 
 import { useEffect, useRef } from "react";
