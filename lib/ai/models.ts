@@ -19,3 +19,8 @@ export const chatModels: ChatModel[] = [
       "Uses advanced chain-of-thought reasoning for complex problems",
   },
 ];
+
+// ✅ Tilføj denne helper
+export function getModel(): string {
+  return process.env.AI_MODEL ?? DEFAULT_CHAT_MODEL;
+}
