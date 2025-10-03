@@ -2,124 +2,85 @@
 
 import { useEffect, useRef } from "react";
 
-const STORAGE_KEY = "autospeak-enabled";
+function scrubAssistantText(input: string): string {
+  let t = input ?? "";
 
-// Ord/fraser vi ikke vil oplæse (ikon/knap-tekst m.v.)
-const BAD_WORDS = [
-  "kopiér", "kopier", "copy",
-  "synes godt om", "synes ikke", "thumbs", "like", "dislike",
-  "del", "share",
-  "svar", "reply",
-  "hænder", "hand", "ikon", "icon"
-];
+  // Fjern emojis/ikon-UI
+  t = t.replace(/[👍👎📎🔊🎤📤📥💬🗒️⭐️]/g, " ");
 
-// Minimum meningsfuld længde på tekst
-const MIN_LEN = 12;
+  // Fjern typiske UI-etiketter (DK/EN) som kan snige sig med i strengen
+  const uiWords = new Set(
+    [
+      "kopi", "kopier", "kopiér", "copy",
+      "upload", "download", "del", "share",
+      "like", "dislike", "thumbs up", "thumbs down",
+      "svar", "send", "besked", "skriv en besked",
+      "response", "respone", "respond", "reply",
+      "test oplæsning", "30 sek pitch", "90 sek pitch", "hvem er kim?",
+    ].map((s) => s.toLowerCase())
+  );
 
-// Valgfri: du kan sætte den til true, hvis du vil have AutoSpeak slået til som standard
-const DEFAULT_ENABLED = true;
+  // Linje-for-linje rens:
+  t = t
+    .split(/\r?\n+/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      const k = line.toLowerCase();
 
-/**
- * Rengør teksten og afgør om vi bør læse den højt.
- * Returnerer den rengjorte tekst eller null, hvis den ikke skal oplæses.
- */
-function sanitizeForSpeech(raw: string): string | null {
-  if (!raw) return null;
+      // Smid helt tomme linjer
+      if (!k) return false;
 
-  // Fjern ekstra whitespace og kontroltegn
-  let t = raw.replace(/\s+/g, " ").replace(/\u200B/g, "").trim();
+      // Smid meget korte "UI-agtige" linjer
+      if (k.length <= 2) return false;
 
-  // Ignorer meget korte bidder
-  if (t.length < MIN_LEN) return null;
+      // Fjern linjer der *kun* består af "UI-ord"
+      if (uiWords.has(k)) return false;
 
-  // Fjern åbenlys UI-støj (enkelt ord/fraser)
-  const low = t.toLowerCase();
-  if (BAD_WORDS.some((w) => low.includes(w))) return null;
+      // Fjern linjer der starter med typiske UI-tekster
+      if (/^(kopi(ér|er)?|copy|upload|download|del|share|svar|send|response|respone|like|dislike)\b/i.test(k)) {
+        return false;
+      }
 
-  // Fjern eventuelle [knap]-markører eller (ikon) mv. (blød rengøring)
-  t = t.replace(/\[[^\]]+\]/g, "").replace(/\([^\)]+\)/g, " ").replace(/\s{2,}/g, " ").trim();
+      // Fjern de auto-knapper vi har tilføjet
+      if (/^(30 sek pitch|90 sek pitch|hvem er kim\?)$/i.test(k)) return false;
 
-  if (t.length < MIN_LEN) return null;
+      return true;
+    })
+    .join("\n");
 
-  // Fjern trailing ikon-artefakter
-  t = t.replace(/(?:👍|👎|🔗|🔊|🔇|📋|🔁)+/g, "").trim();
+  // Fjern "code fences" (hvis de skulle dukke op)
+  t = t.replace(/```[\s\S]*?```/g, "");
 
-  return t.length >= MIN_LEN ? t : null;
-}
+  // Komprimer whitespace
+  t = t.replace(/\s{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 
-/**
- * Spiller en Blob/URL via HTMLAudio—stopper forrige afspilning og rydder URL efter brug.
- */
-function playBlobUrl(url: string, prevAudioRef: React.MutableRefObject<HTMLAudioElement | null>) {
-  try {
-    if (prevAudioRef.current) {
-      try {
-        prevAudioRef.current.pause();
-      } catch {}
-      // Gammel URL kan være en blob, så prøv at frigive
-      try {
-        URL.revokeObjectURL(prevAudioRef.current.src);
-      } catch {}
-    }
-    const a = new Audio(url);
-    prevAudioRef.current = a;
-    // Sørg for at medier må afspilles (Safari/iOS kræver user gesture—men vi har allerede haft en interaktion)
-    a.play().catch((err) => console.error("[AutoSpeak] play error:", err));
-  } catch (err) {
-    console.error("[AutoSpeak] Kunne ikke starte afspilning:", err);
-  }
-}
-
-/**
- * Simpel fallback: brug browserens tekst-til-tale hvis /api/tts fejler.
- */
-function speakFallbackBrowser(text: string, prevAudioRef: React.MutableRefObject<HTMLAudioElement | null>) {
-  try {
-    // Stop evtl. HTMLAudio (for en ren fallback)
-    if (prevAudioRef.current) {
-      try { prevAudioRef.current.pause(); } catch {}
-      try { URL.revokeObjectURL(prevAudioRef.current.src); } catch {}
-      prevAudioRef.current = null;
-    }
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    // Sæt evt. dansk stemme hvis tilgængelig
-    const voices = speechSynthesis.getVoices();
-    const da = voices.find(v => v.lang?.toLowerCase().startsWith("da"));
-    if (da) u.voice = da;
-    speechSynthesis.speak(u);
-  } catch (err) {
-    console.error("[AutoSpeak] Browser-fallback fejlede:", err);
-  }
+  return t;
 }
 
 export default function AutoSpeakObserver() {
-  const lastSpokenRef = useRef<string | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const lastSpokenRef = useRef<string>("");           // deduplikér sidste udsendte
+  const playingRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    // Respektér brugerens toggle
-    const enabledRaw = (typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY)) ?? "";
-    const enabled = enabledRaw === "" ? DEFAULT_ENABLED : enabledRaw === "true";
-    if (!enabled) {
-      console.log("[AutoSpeak] Deaktiveret via localStorage.");
-      return;
-    }
-
     const onFinal = async (e: any) => {
-      // NB: DataStreamHandler burde sende { detail: { text } }
-      const raw: string | undefined = e?.detail?.text;
-      if (!raw) return;
+      const rawText: string | undefined = e?.detail?.text;
+      if (!rawText) return;
 
-      const text = sanitizeForSpeech(raw);
-      if (!text) {
-        // Støj eller for kort tekst – ignorer
-        return;
-      }
+      // Sanér/filtrér
+      const text = scrubAssistantText(rawText);
 
-      // Undgå at læse den samme sætning to gange i træk
+      // Hvis der kun er UI tilbage → ikke tal det
+      if (!text || text.length < 5) return;
+
+      // Deduplikér (undgå at læse samme svar to gange)
       if (text === lastSpokenRef.current) return;
       lastSpokenRef.current = text;
+
+      // Stop igangværende afspilning (hvis bruger skynder sig)
+      try {
+        playingRef.current?.pause?.();
+        playingRef.current = null;
+      } catch {}
 
       try {
         const r = await fetch("/api/tts", {
@@ -130,34 +91,29 @@ export default function AutoSpeakObserver() {
 
         if (!r.ok) {
           console.error("[AutoSpeak] TTS failed:", await r.text());
-          // Fallback: prøv browserens indbyggede TTS
-          speakFallbackBrowser(text, audioRef);
           return;
         }
 
-        // BEMÆRK: Vi bruger arrayBuffer -> blob -> objectURL -> HTMLAudio
         const ab = await r.arrayBuffer();
         const blob = new Blob([ab], { type: "audio/mpeg" });
         const url = URL.createObjectURL(blob);
+        const a = new Audio(url);
+        playingRef.current = a;
 
-        playBlobUrl(url, audioRef);
+        await a.play();
         console.log("[AutoSpeak] Afspilning startet.");
       } catch (err) {
         console.error("[AutoSpeak] TTS error:", err);
-        speakFallbackBrowser(text, audioRef);
       }
     };
 
     window.addEventListener("assistant:final", onFinal);
     return () => {
       window.removeEventListener("assistant:final", onFinal);
-      // Ryd op: stop evt. lyd og frigiv URL
       try {
-        if (audioRef.current) {
-          audioRef.current.pause();
-          URL.revokeObjectURL(audioRef.current.src);
-        }
+        playingRef.current?.pause?.();
       } catch {}
+      playingRef.current = null;
     };
   }, []);
 
