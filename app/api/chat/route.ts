@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     });
 
     // ✅ Dette er vigtigt: Brug DataStreamResponse, ikke TextStreamResponse
-    return result.toDataStreamResponse();
+    return result.toTextStreamResponse();
 
   } catch (err) {
     console.error("[/api/chat] error:", err);
