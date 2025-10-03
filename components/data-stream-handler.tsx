@@ -7,10 +7,11 @@ import { useDataStream } from "./data-stream-provider";
 
 export function DataStreamHandler() {
   const { dataStream } = useDataStream();
+
   const { artifact, setArtifact, setMetadata } = useArtifact();
   const lastProcessedIndex = useRef(-1);
 
-  // 👇 Nyt: track forrige status
+  // Husk forrige status, så vi kan opdage overgang streaming -> idle
   const prevStatus = useRef<string | undefined>(artifact?.status);
 
   useEffect(() => {
@@ -21,8 +22,7 @@ export function DataStreamHandler() {
 
     for (const delta of newDeltas) {
       const artifactDefinition = artifactDefinitions.find(
-        (currentArtifactDefinition) =>
-          currentArtifactDefinition.kind === artifact.kind
+        (def) => def.kind === artifact.kind
       );
 
       if (artifactDefinition?.onStreamPart) {
@@ -33,45 +33,65 @@ export function DataStreamHandler() {
         });
       }
 
-      setArtifact((draftArtifact) => {
-        if (!draftArtifact) {
-          return { ...initialArtifactData, status: "streaming" };
+      setArtifact((draft: any) => {
+        if (!draft) {
+          // 👇 status som literal type
+          return { ...initialArtifactData, status: "streaming" as const };
         }
 
         switch (delta.type) {
           case "data-id":
-            return { ...draftArtifact, documentId: delta.data, status: "streaming" };
+            return {
+              ...draft,
+              documentId: delta.data,
+              status: "streaming" as const,
+            };
 
           case "data-title":
-            return { ...draftArtifact, title: delta.data, status: "streaming" };
+            return {
+              ...draft,
+              title: delta.data,
+              status: "streaming" as const,
+            };
 
           case "data-kind":
-            return { ...draftArtifact, kind: delta.data, status: "streaming" };
+            return {
+              ...draft,
+              kind: delta.data,
+              status: "streaming" as const,
+            };
 
           case "data-clear":
-            return { ...draftArtifact, content: "", status: "streaming" };
+            return {
+              ...draft,
+              content: "",
+              status: "streaming" as const,
+            };
 
           case "data-finish": {
-            const next = { ...draftArtifact, status: "idle" };
+            const next = { ...draft, status: "idle" as const };
+
+            // Emit evt. den endelige tekst som fallback
             const text =
               (next as any)?.content?.toString?.() ??
               (next as any)?.content ??
               "";
             if (text && typeof window !== "undefined") {
-              console.log("[DSH] Fallback dispatch on data-finish:", text.slice(0, 120));
-              window.dispatchEvent(new CustomEvent("assistant:final", { detail: { text } }));
+              window.dispatchEvent(
+                new CustomEvent("assistant:final", { detail: { text } })
+              );
             }
             return next;
           }
 
           default:
-            return draftArtifact;
+            return draft;
         }
       });
     }
   }, [dataStream, setArtifact, setMetadata, artifact]);
 
-  // 👇 Nyt: ekstra sikkerhed – status-overvågning
+  // Ekstra sikkerhed: hvis vi opdager streaming -> idle, emittes final tekst
   useEffect(() => {
     const current = artifact?.status;
     const prev = prevStatus.current;
@@ -81,8 +101,6 @@ export function DataStreamHandler() {
         (artifact as any)?.content?.toString?.() ??
         (artifact as any)?.content ??
         "";
-
-      console.log("[DSH] streaming -> idle. Text length:", text?.length ?? 0);
 
       if (text && typeof window !== "undefined") {
         window.dispatchEvent(
