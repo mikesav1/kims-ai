@@ -1,116 +1,75 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { initialArtifactData, useArtifact } from "@/hooks/use-artifact";
-import { artifactDefinitions } from "./artifact";
 import { useDataStream } from "./data-stream-provider";
 
+/**
+ * This handler only OBSERVES dataStream and dispatches an event when the
+ * assistant message is done. No artifact typing or status juggling.
+ */
 export function DataStreamHandler() {
   const { dataStream } = useDataStream();
 
-  const { artifact, setArtifact, setMetadata } = useArtifact();
-  const lastProcessedIndex = useRef(-1);
-
-  // Husk forrige status, så vi kan opdage overgang streaming -> idle
-  const prevStatus = useRef<string | undefined>(artifact?.status);
+  // keep a buffer for the current assistant message
+  const bufferRef = useRef<string>("");
+  // process only new deltas each render
+  const lastIndexRef = useRef<number>(-1);
 
   useEffect(() => {
-    if (!dataStream?.length) return;
+    if (!dataStream || dataStream.length === 0) return;
 
-    const newDeltas = dataStream.slice(lastProcessedIndex.current + 1);
-    lastProcessedIndex.current = dataStream.length - 1;
+    const start = lastIndexRef.current + 1;
+    const newDeltas = dataStream.slice(start);
+    lastIndexRef.current = dataStream.length - 1;
 
     for (const delta of newDeltas) {
-      const artifactDefinition = artifactDefinitions.find(
-        (def) => def.kind === artifact.kind
-      );
+      // Debug: see exactly what your stream emits
+      // Open DevTools console and watch these logs
+      console.log("Δ", delta?.type, delta);
 
-      if (artifactDefinition?.onStreamPart) {
-        artifactDefinition.onStreamPart({
-          streamPart: delta,
-          setArtifact,
-          setMetadata,
-        });
+      // If a new assistant message begins, clear buffer
+      // Many templates send a "role" delta; keep this generic & safe
+      if (delta?.type === "role" && (delta as any)?.data === "assistant") {
+        bufferRef.current = "";
+        continue;
       }
 
-      setArtifact((draft: any) => {
-        if (!draft) {
-          // 👇 status som literal type
-          return { ...initialArtifactData, status: "streaming" as const };
-        }
-
-        switch (delta.type) {
-          case "data-id":
-            return {
-              ...draft,
-              documentId: delta.data,
-              status: "streaming" as const,
-            };
-
-          case "data-title":
-            return {
-              ...draft,
-              title: delta.data,
-              status: "streaming" as const,
-            };
-
-          case "data-kind":
-            return {
-              ...draft,
-              kind: delta.data,
-              status: "streaming" as const,
-            };
-
-          case "data-clear":
-            return {
-              ...draft,
-              content: "",
-              status: "streaming" as const,
-            };
-
-          case "data-finish": {
-            const next = { ...draft, status: "idle" as const };
-
-            // Emit evt. den endelige tekst som fallback
-            const text =
-              (next as any)?.content?.toString?.() ??
-              (next as any)?.content ??
-              "";
-            if (text && typeof window !== "undefined") {
-              window.dispatchEvent(
-                new CustomEvent("assistant:final", { detail: { text } })
-              );
-            }
-            return next;
-          }
-
-          default:
-            return draft;
-        }
-      });
-    }
-  }, [dataStream, setArtifact, setMetadata, artifact]);
-
-  // Ekstra sikkerhed: hvis vi opdager streaming -> idle, emittes final tekst
-  useEffect(() => {
-    const current = artifact?.status;
-    const prev = prevStatus.current;
-
-    if (prev !== "idle" && current === "idle") {
-      const text =
-        (artifact as any)?.content?.toString?.() ??
-        (artifact as any)?.content ??
+      // Try to pick up text chunks across common delta shapes:
+      // adjust as we learn what your template emits from the console logs.
+      const asAny = delta as any;
+      const maybeTextChunk =
+        asAny.textDelta ??
+        asAny.delta ??
+        asAny.text ??
+        asAny.data ??
+        asAny.content ??
         "";
 
-      if (text && typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent("assistant:final", { detail: { text } })
-        );
+      if (typeof maybeTextChunk === "string" && maybeTextChunk) {
+        bufferRef.current += maybeTextChunk;
+      }
+
+      // When the assistant finishes, templates usually emit some *finish* delta.
+      // Catch several common variants:
+      const t = (delta?.type || "").toString().toLowerCase();
+      const looksFinished =
+        t.includes("finish") ||
+        t === "message-finish" ||
+        t === "data-finish" ||
+        t === "assistant-finish";
+
+      if (looksFinished) {
+        const text = bufferRef.current.trim();
+        if (text) {
+          // Fire the event our AutoSpeak listens to
+          window.dispatchEvent(
+            new CustomEvent("assistant:final", { detail: { text } })
+          );
+        }
+        bufferRef.current = "";
       }
     }
-
-    prevStatus.current = current;
-  }, [artifact?.status, artifact?.content]);
+  }, [dataStream]);
 
   return null;
 }
