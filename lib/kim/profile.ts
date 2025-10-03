@@ -5,7 +5,6 @@
  * at gentage dig selv i hver prompt.
  */
 // lib/kim-agent-promt.ts
-import { buildKimSystemSnippet } from "@/lib/kim/profile";
 
 export const KIM_AGENT_SYSTEM = `
 Sprog: Dansk. Svar altid på dansk, med mindre brugeren tydeligt beder om andet.
