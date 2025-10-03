@@ -4,18 +4,42 @@ import { useEffect, useRef } from "react";
 import { useDataStream } from "./data-stream-provider";
 
 /**
- * Observerer kun dataStream og udsender 'assistant:final' med den samlede tekst,
- * når en assistent-svar er færdigt. Rører ikke ved artifact-typerne.
+ * Robust stream-handler:
+ * - Bufferer tekst fra tekst-deltas (flere felt-navne understøttes)
+ * - Udløser 'assistant:final' ved finish-delta ELLER efter inaktivitet (fallback)
+ * - Logger alle deltas i konsollen (så vi kan finjustere)
  */
 export function DataStreamHandler() {
   const { dataStream } = useDataStream();
 
-  // buffer for nuværende assistent-svar
+  // Buffer for igangværende svar
   const bufferRef = useRef<string>("");
-  // track om vi er i gang med at modtage et svar
   const inProgressRef = useRef<boolean>(false);
-  // behandl kun nye deltas
   const lastIndexRef = useRef<number>(-1);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Hvor mange ms uden nye tekst-chunks før vi flusher (fallback)
+  const IDLE_MS = 1200;
+
+  const flush = () => {
+    const text = bufferRef.current.trim();
+    if (text) {
+      console.log("[DataStreamHandler] FLUSH -> assistant:final", text.slice(0, 120), "…");
+      window.dispatchEvent(new CustomEvent("assistant:final", { detail: { text } }));
+    }
+    bufferRef.current = "";
+    inProgressRef.current = false;
+  };
+
+  const armIdleTimer = () => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = setTimeout(() => {
+      if (inProgressRef.current) {
+        console.log("[DataStreamHandler] idle timeout -> flush");
+        flush();
+      }
+    }, IDLE_MS);
+  };
 
   useEffect(() => {
     if (!dataStream || dataStream.length === 0) return;
@@ -25,13 +49,12 @@ export function DataStreamHandler() {
     lastIndexRef.current = dataStream.length - 1;
 
     for (const delta of newDeltas) {
-      // debug i konsollen—se præcis hvad dit setup sender
       console.log("Δ", delta?.type, delta);
 
       const t = String(delta?.type || "").toLowerCase();
-
-      // Hent tekst-chunk på tværs af typiske felter
       const any = delta as any;
+
+      // Læs tekst fra de mest almindelige felter
       let chunk = "";
       if (typeof any.textDelta === "string") chunk = any.textDelta;
       else if (typeof any.delta === "string") chunk = any.delta;
@@ -39,16 +62,17 @@ export function DataStreamHandler() {
       else if (typeof any.data === "string") chunk = any.data;
       else if (typeof any.content === "string") chunk = any.content;
 
-      // Hvis vi modtager tekst og ikke var i gang, så starter vi implicit en ny buffer
       if (chunk) {
         if (!inProgressRef.current) {
+          console.log("[DataStreamHandler] start new buffer");
           bufferRef.current = "";
           inProgressRef.current = true;
         }
         bufferRef.current += chunk;
+        armIdleTimer();
       }
 
-      // Slut-delta? match flere almindelige varianter
+      // Slut-signaler – match flere varianter
       const looksFinished =
         t.includes("finish") ||
         t === "message-finish" ||
@@ -56,17 +80,17 @@ export function DataStreamHandler() {
         t === "assistant-finish";
 
       if (looksFinished) {
-        const text = bufferRef.current.trim();
-        if (text) {
-          window.dispatchEvent(
-            new CustomEvent("assistant:final", { detail: { text } })
-          );
-        }
-        bufferRef.current = "";
-        inProgressRef.current = false;
+        console.log("[DataStreamHandler] finish delta -> flush");
+        flush();
       }
     }
   }, [dataStream]);
+
+  useEffect(() => {
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
+  }, []);
 
   return null;
 }
