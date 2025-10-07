@@ -57,7 +57,7 @@ export async function POST(request: Request) {
       });
 
       // afslut
-      writer.write({ type: "data-done" });
+     writer.close();
     },
   });
 
