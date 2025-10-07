@@ -33,6 +33,23 @@ import { getChatHistoryPaginationKey } from "./sidebar-history";
 import { toast } from "./toast";
 import type { VisibilityType } from "./visibility-selector";
 
+/** Hjælper: serialiser parts -> content (simpelt tekst-sammenlægning) */
+function serializeMessagesForApi(msgs: ChatMessage[]) {
+  return msgs.map((m) => {
+    // dine ChatMessage har parts [{type:"text", text:"..."}], evt. andre typer
+    const text =
+      (m.parts || [])
+        .map((p) => (p.type === "text" ? p.text : ""))
+        .join(" ")
+        .trim() || ""; // tom streng hvis ingen tekstdele
+
+    return {
+      role: m.role,
+      content: text,
+    };
+  });
+}
+
 export function Chat({
   id,
   initialMessages,
@@ -82,13 +99,21 @@ export function Chat({
     experimental_throttle: 100,
     generateId: generateUUID,
     transport: new DefaultChatTransport({
-      api: "/api/chat",
+      api: "/api/chat",                // <<— Sørger for at bruge dit API
       fetch: fetchWithErrorHandlers,
       prepareSendMessagesRequest(request) {
+        // Send både 'message' (din nuværende form) OG en serialiseret 'messages'-liste
+        const serialized = serializeMessagesForApi(request.messages || []);
+        const lastMessage = request.messages?.at(-1);
+
         return {
           body: {
             id: request.id,
-            message: request.messages.at(-1),
+            // oprindelig form (lad blive – hvis noget i backend bruger den):
+            message: lastMessage,
+            // eksplicit liste som backend kan parse:
+            messages: serialized,
+            // dine øvrige felter:
             selectedChatModel: currentModelIdRef.current,
             selectedVisibilityType: visibilityType,
             ...request.body,
@@ -107,7 +132,6 @@ export function Chat({
     },
     onError: (error) => {
       if (error instanceof ChatSDKError) {
-        // Check if it's a credit card error
         if (
           error.message?.includes("AI Gateway requires a valid credit card")
         ) {
@@ -124,7 +148,6 @@ export function Chat({
 
   const searchParams = useSearchParams();
   const query = searchParams.get("query");
-
   const [hasAppendedQuery, setHasAppendedQuery] = useState(false);
 
   useEffect(() => {
