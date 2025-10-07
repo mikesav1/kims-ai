@@ -7,7 +7,6 @@ import { useEffect, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
 import { ChatHeader } from "@/components/chat-header";
-
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,7 +17,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-
 import { useArtifactSelector } from "@/hooks/use-artifact";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
@@ -77,10 +75,7 @@ export function Chat({
   const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
-
-  useEffect(() => {
-    currentModelIdRef.current = currentModelId;
-  }, [currentModelId]);
+  useEffect(() => void (currentModelIdRef.current = currentModelId), [currentModelId]);
 
   const {
     messages,
@@ -102,7 +97,6 @@ export function Chat({
         const serialized = serializeMessagesForApi(request.messages || []);
         const lastMessage = request.messages?.at(-1);
 
-        // SIKKERHED: fjern evt. debug-flag som kan snige sig ind
         const extras = { ...(request.body || {}) } as Record<string, any>;
         delete extras.mode;
         delete extras["x-debug"];
@@ -110,8 +104,8 @@ export function Chat({
         return {
           body: {
             id: request.id,
-            message: lastMessage, // kompatibilitet til evt. gammel backend-brug
-            messages: serialized, // foretrukne liste
+            message: lastMessage,       // kompatibilitet
+            messages: serialized,       // foretrukne format
             selectedChatModel: currentModelIdRef.current,
             selectedVisibilityType: visibilityType,
             ...extras,
@@ -119,9 +113,9 @@ export function Chat({
         };
       },
     }),
-    onData: (dataPart) => {
-      setDataStream((ds) => (ds ? [...ds, dataPart] : []));
-      if (dataPart.type === "data-usage") setUsage(dataPart.data);
+    onData: (part) => {
+      setDataStream((ds) => (ds ? [...ds, part] : []));
+      if (part.type === "data-usage") setUsage(part.data);
     },
     onFinish: () => {
       mutate(unstable_serialize(getChatHistoryPaginationKey));
@@ -140,17 +134,13 @@ export function Chat({
   const searchParams = useSearchParams();
   const query = searchParams.get("query");
   const [hasAppendedQuery, setHasAppendedQuery] = useState(false);
-
   useEffect(() => {
     if (query && !hasAppendedQuery) {
-      sendMessage({
-        role: "user" as const,
-        parts: [{ type: "text", text: query }],
-      });
+      sendMessage({ role: "user" as const, parts: [{ type: "text", text: query }] });
       setHasAppendedQuery(true);
       window.history.replaceState({}, "", `/chat/${id}`);
     }
-  }, [query, sendMessage, hasAppendedQuery, id]);
+  }, [query, hasAppendedQuery, sendMessage, id]);
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
@@ -158,14 +148,9 @@ export function Chat({
   );
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const isArtifactVisible = useArtifactSelector((state) => state.isVisible);
+  const isArtifactVisible = useArtifactSelector((s) => s.isVisible);
 
-  useAutoResume({
-    autoResume,
-    initialMessages,
-    resumeStream,
-    setMessages,
-  });
+  useAutoResume({ autoResume, initialMessages, resumeStream, setMessages });
 
   return (
     <>
