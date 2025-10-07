@@ -1,12 +1,12 @@
-cd kims-ai
-git switch main
-cat > app/(chat)/api/chat/route.ts <<'TS'
 import { streamText } from "ai";
 import { xai } from "@ai-sdk/xai";
+
+export const runtime = "edge";
 
 export async function POST(request: Request) {
   const url = new URL(request.url);
 
+  // Debug-mode: /api/chat?mode=json
   if (url.searchParams.get("mode") === "json") {
     let body: any = {};
     try { body = await request.json(); } catch {}
@@ -21,6 +21,7 @@ export async function POST(request: Request) {
     );
   }
 
+  // Normal streaming fra modellen
   const { messages = [] } = await request.json();
 
   const result = await streamText({
@@ -31,4 +32,3 @@ export async function POST(request: Request) {
 
   return result.toTextStreamResponse();
 }
-TS
