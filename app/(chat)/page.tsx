@@ -7,8 +7,8 @@ import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
 import { generateUUID } from "@/lib/utils";
 import { auth } from "../(auth)/auth";
 
-// behold kun MANUEL oplæsning:
 import TTSButtons from "./TTSButtons";
+import AutoSpeakObserver from "./AutoSpeakObserver"; // behold KUN denne
 
 export default async function Page() {
   const session = await auth();
@@ -31,9 +31,10 @@ export default async function Page() {
       />
       <DataStreamHandler />
 
-      {/* Manuel oplæsning via knapper – ingen auto-speak */}
-      <div className="mt-4">
+      {/* Manuel TTS + autospeak kun når AI-svar er færdigt */}
+      <div className="mt-4 space-y-3">
         <TTSButtons />
+        <AutoSpeakObserver />
       </div>
     </>
   );
