@@ -1,22 +1,22 @@
 // app/api/chat/route.ts
 export const runtime = "edge";
 
-/** Lille uid-helper uden 'crypto' import */
-function uid() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  return Math.random().toString(36).slice(2);
-}
+type UIMessage = {
+  role: "user" | "assistant" | "system";
+  content?: string; // hvis du bruger 'content' (plain useChat)
+  parts?: Array<{ type: "text"; text: string }>; // hvis du bruger 'parts'
+};
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  return new Response(
-    JSON.stringify({
+  return Response.json(
+    {
       ok: true,
       handler: "GET",
       path: url.pathname + url.search,
       note: "chat GET ok",
-    }),
-    { status: 200, headers: { "Content-Type": "application/json" } }
+    },
+    { status: 200 }
   );
 }
 
@@ -24,53 +24,46 @@ export async function POST(request: Request) {
   let body: any = {};
   try {
     body = await request.json();
-  } catch {}
+  } catch {
+    // ignore
+  }
 
-  // find sidste brugerbesked (understøtter både {content} og {parts:[{type:'text'}]})
-  const msgs = Array.isArray(body?.messages) ? body.messages : [];
-  const last =
-    msgs.at(-1)?.content ??
-    msgs.at(-1)?.parts?.find((p: any) => p?.type === "text")?.text ??
-    "(ingen besked)";
+  // 🔴 TVING JSON-MODE når vi beder om det fra UI (via header eller body)
+  const wantsJson =
+    request.headers.get("x-debug") === "json" || body?.mode === "json";
 
-  const replyText = `Hej Kim – jeg virker nu ✅
-Du skrev: “${last}”`;
+  if (wantsJson) {
+    // prøv at udlede sidste brugerbesked (understøtter både 'messages[].content' og 'message.parts[0].text')
+    const lastFromMessagesContent =
+      Array.isArray(body?.messages) && body.messages.length
+        ? (body.messages as UIMessage[]).at(-1)?.content ?? ""
+        : "";
 
-  const encoder = new TextEncoder();
+    const lastFromMessageParts =
+      body?.message?.parts?.[0]?.text ??
+      body?.messages?.at?.(-1)?.parts?.[0]?.text ??
+      "";
 
-  // Rå SSE: send præcis de events useChat forventer
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      const send = (event: string, data?: unknown) => {
-        let payload = `event: ${event}\n`;
-        if (data !== undefined) {
-          payload += `data: ${JSON.stringify(data)}\n`;
-        }
-        payload += `\n`;
-        controller.enqueue(encoder.encode(payload));
-      };
+    const last = lastFromMessagesContent || lastFromMessageParts || "";
 
-      // 1) send selve svaret
-      send("data-appendMessage", {
-        id: uid(),
-        role: "assistant",
-        parts: [{ type: "text", text: replyText }],
-        createdAt: new Date().toISOString(),
-      });
+    return Response.json(
+      {
+        ok: true,
+        handler: "POST-json",
+        reply: last ? `Echo: ${last}` : "Echo: (ingen besked)",
+        received: body,
+      },
+      { status: 200 }
+    );
+  }
 
-      // 2) signalér at vi er færdige (meget vigtigt – ellers venter UI’et!)
-      send("data-done");
-
-      controller.close();
+  // 🟡 Her kan din rigtige stream-løsning ligge senere.
+  // Mens vi fejlsøger UI, holder vi os til JSON-svar:
+  return Response.json(
+    {
+      ok: true,
+      note: "chat endpoint alive (stream midlertidigt slået fra)",
     },
-  });
-
-  return new Response(stream, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-    },
-  });
+    { status: 200 }
+  );
 }
