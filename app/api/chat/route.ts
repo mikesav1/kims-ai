@@ -15,6 +15,10 @@ function readText(body: any): { lastText: string; all: InMsg[] } {
   return { lastText, all: cleaned };
 }
 
+function sseLine(obj: any) {
+  return `data: ${JSON.stringify(obj)}\n\n`;
+}
+
 export async function POST(req: Request) {
   let body: any = {};
   try {
@@ -23,8 +27,8 @@ export async function POST(req: Request) {
     body = {};
   }
 
-  // Læs sidste bruger-besked (til demo-svar)
   const { lastText } = readText(body);
+
   const reply =
     lastText && lastText.trim()
       ? `Hej! Du skrev: “${lastText.trim()}”. Her er et streamsvar.`
@@ -34,39 +38,45 @@ export async function POST(req: Request) {
 
   const stream = new ReadableStream({
     start(controller) {
-      // lille “typing”-fornemmelse
-      const chunks = reply.split(/(\s+)/).filter(Boolean);
-
-      // AI SDK’s transport kan forstå en simpel “text-delta” + “final”
+      // 1) signalér at assistenten starter
       controller.enqueue(
-        encoder.encode(
-          `data: ${JSON.stringify({ type: "assistant-start" })}\n\n`
-        )
+        encoder.encode(sseLine({ type: "assistant-start" }))
       );
 
+      // 2) send “typing” med text-delta (valgfrit, men rart)
+      const words = reply.split(/(\s+)/).filter(Boolean);
       let i = 0;
+
       const tick = () => {
-        if (i >= chunks.length) {
+        if (i >= words.length) {
+          // 3a) send en fuld “assistant-message” som fallback/snapshot
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ type: "final" })}\n\n`
+              sseLine({
+                type: "assistant-message",
+                message: {
+                  id: crypto.randomUUID?.() ?? String(Date.now()),
+                  role: "assistant",
+                  content: [{ type: "text", text: reply }],
+                },
+              })
             )
           );
+
+          // 3b) slut korrekt
+          controller.enqueue(encoder.encode(sseLine({ type: "assistant-finish" })));
           controller.close();
           return;
         }
 
         controller.enqueue(
           encoder.encode(
-            `data: ${JSON.stringify({
-              type: "text-delta",
-              textDelta: chunks[i],
-            })}\n\n`
+            sseLine({ type: "text-delta", textDelta: words[i] })
           )
         );
 
         i += 1;
-        setTimeout(tick, 40);
+        setTimeout(tick, 35);
       };
 
       tick();
@@ -83,7 +93,6 @@ export async function POST(req: Request) {
   });
 }
 
-// (valgfrit) En simpel GET – hjælper i DevTools, hvis du vil sanity-tjekke endpointet
 export async function GET() {
   return new Response(
     JSON.stringify({ ok: true, note: "chat endpoint alive (GET)" }),
