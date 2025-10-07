@@ -1,4 +1,3 @@
-cat > "app/(chat)/api/chat/route.ts" <<'TS'
 export async function GET(request: Request) {
   const url = new URL(request.url);
   return new Response(JSON.stringify({
@@ -13,6 +12,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const url = new URL(request.url);
+
   if (url.searchParams.get("mode") === "json") {
     let body: any = {};
     try { body = await request.json(); } catch {}
@@ -26,13 +26,9 @@ export async function POST(request: Request) {
       headers: { "Content-Type": "application/json", "x-kim-debug": "post-json-ok-123" }
     });
   }
+
   return new Response(JSON.stringify({ ok: true, handler: "POST" }), {
     status: 200,
     headers: { "Content-Type": "application/json", "x-kim-debug": "post-ok-123" }
   });
 }
-TS
-
-git add "app/(chat)/api/chat/route.ts"
-git commit -m "fix: add GET/POST handlers to (chat) api/chat route"
-git push origin main
