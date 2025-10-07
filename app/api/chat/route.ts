@@ -1,26 +1,20 @@
 // app/api/chat/route.ts
-import { NextResponse } from "next/server";
-import { streamText } from "ai";
-import { KIM_AGENT_SYSTEM } from "@/lib/kim-agent-promt";
-import { getModel } from "@/lib/ai/models";
+export async function POST(request: Request) {
+  const url = new URL(request.url);
 
-export const runtime = "edge";
-
-export async function POST(req: Request) {
-  try {
-    const { messages = [] } = await req.json();
-    const model = getModel(); // returnerer din valgte ChatModel
-
-    const result = await streamText({
-      model,
-      system: KIM_AGENT_SYSTEM, // din danske systemprompt
-      messages,
+  // Debug-mode: /api/chat?mode=json
+  if (url.searchParams.get("mode") === "json") {
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch {}
+    return Response.json({
+      ok: true,
+      reply: `Echo: ${body?.message ?? "ingen besked"}`,
+      received: body,
     });
-
-    // VIGTIGT: brug text-stream response (den findes i din ai-version)
-    return result.toTextStreamResponse();
-  } catch (err) {
-    console.error("[/api/chat] error:", err);
-    return NextResponse.json({ error: "Chat server error." }, { status: 500 });
   }
+
+  // Standard-svar (midlertidigt)
+  return Response.json({ ok: true, note: "chat endpoint alive" });
 }
