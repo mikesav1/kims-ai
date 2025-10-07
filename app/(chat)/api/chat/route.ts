@@ -1,34 +1,40 @@
+// app/(chat)/api/chat/route.ts
 import { streamText } from "ai";
+// Brug én af disse to afhængigt af dit projekt.
+// A) Hvis du har en getModel() i "@/lib/ai/models":
+// import { getModel } from "@/lib/ai/models";
+
+// B) Ellers brug xAI direkte (kræver XAI_API_KEY i env):
 import { xai } from "@ai-sdk/xai";
+
+import { KIM_AGENT_SYSTEM } from "@/lib/kim/profile";
 
 export const runtime = "edge";
 
-export async function POST(request: Request) {
-  const url = new URL(request.url);
+export async function POST(req: Request) {
+  try {
+    const { messages = [] } = await req.json();
 
-  // Debug-mode: /api/chat?mode=json
-  if (url.searchParams.get("mode") === "json") {
-    let body: any = {};
-    try { body = await request.json(); } catch {}
+    // Vælg model:
+    // A) Hvis du har en getModel():
+    // const model = getModel();
+
+    // B) Ellers xAI direkte:
+    const model = xai("grok-beta");
+
+    const result = await streamText({
+      model,
+      system: KIM_AGENT_SYSTEM,
+      messages,
+    });
+
+    // AI SDK v5: brug tekst-stream svar
+    return result.toTextStreamResponse();
+  } catch (err) {
+    console.error("[/api/chat] error:", err);
     return new Response(
-      JSON.stringify({
-        ok: true,
-        handler: "POST-json",
-        reply: `Echo: ${body?.message ?? ""}`,
-        received: body
-      }),
-      { headers: { "Content-Type": "application/json" } }
+      JSON.stringify({ error: "Chat server error." }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
-
-  // Normal streaming fra modellen
-  const { messages = [] } = await request.json();
-
-  const result = await streamText({
-    model: xai("grok-beta"),
-    system: "Svar på dansk, kort og konkret for Kim Vase.",
-    messages
-  });
-
-  return result.toTextStreamResponse();
 }
