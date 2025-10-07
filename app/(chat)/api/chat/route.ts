@@ -1,27 +1,38 @@
-// app/api/chat/route.ts
-import { NextResponse } from "next/server";
-import { streamText, convertToModelMessages } from "ai";
-import { KIM_AGENT_SYSTEM } from "@/lib/kim-agent-promt";
-import { getModel } from "@/lib/ai/models";
-
-export const runtime = "edge";
-
-export async function POST(req: Request) {
-  try {
-    // body forventes á la { messages: [...] }
-    const { messages = [] } = await req.json();
-    const model = getModel(); // returnerer dit standard sprogmodel-objekt
-
-    const result = await streamText({
-      model,
-      system: KIM_AGENT_SYSTEM,
-      messages: convertToModelMessages(messages),
-    });
-
-    // ⬇ vigtig: brug text-stream respons-typen som din UI forstår
-    return result.toTextStreamResponse();
-  } catch (err) {
-    console.error("[/api/chat] error:", err);
-    return NextResponse.json({ error: "Chat server error." }, { status: 500 });
-  }
+cat > "app/(chat)/api/chat/route.ts" <<'TS'
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  return new Response(JSON.stringify({
+    ok: true,
+    handler: "GET",
+    path: url.pathname + url.search
+  }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", "x-kim-debug": "get-ok-123" }
+  });
 }
+
+export async function POST(request: Request) {
+  const url = new URL(request.url);
+  if (url.searchParams.get("mode") === "json") {
+    let body: any = {};
+    try { body = await request.json(); } catch {}
+    return new Response(JSON.stringify({
+      ok: true,
+      handler: "POST-json",
+      reply: `Echo: ${body?.message ?? "ingen besked"}`,
+      received: body
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", "x-kim-debug": "post-json-ok-123" }
+    });
+  }
+  return new Response(JSON.stringify({ ok: true, handler: "POST" }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", "x-kim-debug": "post-ok-123" }
+  });
+}
+TS
+
+git add "app/(chat)/api/chat/route.ts"
+git commit -m "fix: add GET/POST handlers to (chat) api/chat route"
+git push origin main
