@@ -1,3 +1,6 @@
+cd kims-ai
+git switch main
+cat > app/(chat)/api/chat/route.ts <<'TS'
 import { streamText } from "ai";
 import { xai } from "@ai-sdk/xai";
 
@@ -28,3 +31,4 @@ export async function POST(request: Request) {
 
   return result.toTextStreamResponse();
 }
+TS
