@@ -36,17 +36,12 @@ import type { VisibilityType } from "./visibility-selector";
 /** Hjælper: serialiser parts -> content (simpelt tekst-sammenlægning) */
 function serializeMessagesForApi(msgs: ChatMessage[]) {
   return msgs.map((m) => {
-    // dine ChatMessage har parts [{type:"text", text:"..."}], evt. andre typer
     const text =
       (m.parts || [])
         .map((p) => (p.type === "text" ? p.text : ""))
         .join(" ")
-        .trim() || ""; // tom streng hvis ingen tekstdele
-
-    return {
-      role: m.role,
-      content: text,
-    };
+        .trim() || "";
+    return { role: m.role, content: text };
   });
 }
 
@@ -67,11 +62,7 @@ export function Chat({
   autoResume: boolean;
   initialLastContext?: AppUsage;
 }) {
-  const { visibilityType } = useChatVisibility({
-    chatId: id,
-    initialVisibilityType,
-  });
-
+  const { visibilityType } = useChatVisibility({ chatId: id, initialVisibilityType });
   const { mutate } = useSWRConfig();
   const { setDataStream } = useDataStream();
 
@@ -80,10 +71,7 @@ export function Chat({
   const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
-
-  useEffect(() => {
-    currentModelIdRef.current = currentModelId;
-  }, [currentModelId]);
+  useEffect(() => { currentModelIdRef.current = currentModelId; }, [currentModelId]);
 
   const {
     messages,
@@ -99,21 +87,21 @@ export function Chat({
     experimental_throttle: 100,
     generateId: generateUUID,
     transport: new DefaultChatTransport({
-      api: "/api/chat",                // <<— Sørger for at bruge dit API
+      api: "/api/chat",
       fetch: fetchWithErrorHandlers,
       prepareSendMessagesRequest(request) {
-        // Send både 'message' (din nuværende form) OG en serialiseret 'messages'-liste
         const serialized = serializeMessagesForApi(request.messages || []);
         const lastMessage = request.messages?.at(-1);
-
         return {
+          headers: {
+            "Content-Type": "application/json",
+            "x-debug": "json",        // 👈 tving midlertidigt JSON-svar fra /api/chat
+          },
           body: {
+            mode: "json",             // 👈 samme signal i body (belt & suspenders)
             id: request.id,
-            // oprindelig form (lad blive – hvis noget i backend bruger den):
-            message: lastMessage,
-            // eksplicit liste som backend kan parse:
-            messages: serialized,
-            // dine øvrige felter:
+            message: lastMessage,     // bevar nuværende form
+            messages: serialized,     // eksplicit liste som backend let kan parse
             selectedChatModel: currentModelIdRef.current,
             selectedVisibilityType: visibilityType,
             ...request.body,
@@ -123,24 +111,17 @@ export function Chat({
     }),
     onData: (dataPart) => {
       setDataStream((ds) => (ds ? [...ds, dataPart] : []));
-      if (dataPart.type === "data-usage") {
-        setUsage(dataPart.data);
-      }
+      if (dataPart.type === "data-usage") setUsage(dataPart.data);
     },
     onFinish: () => {
       mutate(unstable_serialize(getChatHistoryPaginationKey));
     },
     onError: (error) => {
       if (error instanceof ChatSDKError) {
-        if (
-          error.message?.includes("AI Gateway requires a valid credit card")
-        ) {
+        if (error.message?.includes("AI Gateway requires a valid credit card")) {
           setShowCreditCardAlert(true);
         } else {
-          toast({
-            type: "error",
-            description: error.message,
-          });
+          toast({ type: "error", description: error.message });
         }
       }
     },
@@ -152,11 +133,7 @@ export function Chat({
 
   useEffect(() => {
     if (query && !hasAppendedQuery) {
-      sendMessage({
-        role: "user" as const,
-        parts: [{ type: "text", text: query }],
-      });
-
+      sendMessage({ role: "user" as const, parts: [{ type: "text", text: query }] });
       setHasAppendedQuery(true);
       window.history.replaceState({}, "", `/chat/${id}`);
     }
@@ -170,12 +147,7 @@ export function Chat({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const isArtifactVisible = useArtifactSelector((state) => state.isVisible);
 
-  useAutoResume({
-    autoResume,
-    initialMessages,
-    resumeStream,
-    setMessages,
-  });
+  useAutoResume({ autoResume, initialMessages, resumeStream, setMessages });
 
   return (
     <>
@@ -238,10 +210,7 @@ export function Chat({
         votes={votes}
       />
 
-      <AlertDialog
-        onOpenChange={setShowCreditCardAlert}
-        open={showCreditCardAlert}
-      >
+      <AlertDialog onOpenChange={setShowCreditCardAlert} open={showCreditCardAlert}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Activate AI Gateway</AlertDialogTitle>
