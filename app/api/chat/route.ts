@@ -1,32 +1,5 @@
 // app/api/chat/route.ts
-import { createUIMessageStream, JsonToSseTransformStream } from "ai";
-import { randomUUID } from "crypto";
-
 export const runtime = "edge";
-
-function pickUserText(body: any): string {
-  // 1) Vores nye client sender en serialiseret liste: [{role, content}]
-  if (Array.isArray(body?.messages) && body.messages.length) {
-    const last = body.messages[body.messages.length - 1];
-    if (typeof last?.content === "string") return last.content;
-  }
-
-  // 2) Faldbak: gammel form med { message: { parts:[{type:"text",text:"..."}] } }
-  const parts = body?.message?.parts;
-  if (Array.isArray(parts)) {
-    const txt = parts
-      .filter((p: any) => p?.type === "text" && typeof p?.text === "string")
-      .map((p: any) => p.text)
-      .join(" ")
-      .trim();
-    if (txt) return txt;
-  }
-
-  // 3) Sidste faldbak: hvis der kom en flad `message`
-  if (typeof body?.message === "string") return body.message;
-
-  return "";
-}
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -35,9 +8,12 @@ export async function GET(request: Request) {
       ok: true,
       handler: "GET",
       path: url.pathname + url.search,
-      note: "chat GET ok",
+      note: "chat GET ok (edge)",
     }),
-    { status: 200, headers: { "Content-Type": "application/json" } }
+    {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }
   );
 }
 
@@ -45,46 +21,37 @@ export async function POST(request: Request) {
   let body: any = {};
   try {
     body = await request.json();
-  } catch {}
+  } catch {
+    body = {};
+  }
 
-  const userText = pickUserText(body);
-  const reply =
-    `Hej! Jeg er Kim-agenten og jeg virker 👍\n` +
-    (userText ? `Du skrev: “${userText}”\n\n` : "\n") +
-    `• Dette svar sendes som en UI-stream (som useChat forventer).\n` +
-    `• Næste trin: koble Kim-profil og model på.`;
+  // brug Web Crypto i stedet for Node import
+  const id =
+    globalThis.crypto && "randomUUID" in globalThis.crypto
+      ? globalThis.crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
 
-  // Send en minimal UI-stream med én assistent-besked
-  const stream = createUIMessageStream({
-    execute: ({ writer }) => {
-      const msg = {
-        id: randomUUID(),
-        role: "assistant" as const,
-        parts: [{ type: "text" as const, text: reply }],
-        createdAt: new Date(),
-        attachments: [] as any[],
-        chatId: body?.id ?? randomUUID(),
-      };
+  // find sidste besked
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  const last = messages[messages.length - 1]?.content ?? "";
 
-      // append den færdige besked til UI'et
-      writer.write({
-        type: "data-appendMessage",
-        data: JSON.stringify(msg),
-      });
+  const reply = `Hej! Jeg er Kim-agenten og jeg virker 👍
+Du skrev: “${last}”
 
-      // signalér at vi er færdige
-      writer.write({ type: "done" });
-      writer.close();
+• Dette svar kommer som en tekst-stream (Edge version).
+• ID: ${id}
+`;
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(reply));
+      controller.close();
     },
-    generateId: randomUUID,
   });
 
-  return new Response(stream.pipeThrough(new JsonToSseTransformStream()), {
+  return new Response(stream, {
     status: 200,
-    headers: {
-      // vigtigt for SSE
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-    },
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
   });
 }
