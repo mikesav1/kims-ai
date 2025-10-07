@@ -1,90 +1,98 @@
 // app/api/chat/route.ts
 export const runtime = "edge";
 
-function json(res: unknown, status = 200) {
-  return new Response(JSON.stringify(res), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8" },
-  });
+function safeJsonParse(input: string | null) {
+  if (!input) return {};
+  try { return JSON.parse(input); } catch { return {}; }
 }
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  // GET: hvis du sætter ?mode=json, returnerer vi JSON
-  if ((url.searchParams.get("mode") || "").toLowerCase() === "json") {
-    return json({
+  return new Response(
+    JSON.stringify({
       ok: true,
-      handler: "GET-json",
+      handler: "GET",
       path: url.pathname + url.search,
       note: "chat GET ok",
-    });
-  }
-  // Ellers bare en kort tekst
-  return new Response("chat GET ok", {
-    status: 200,
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
-  });
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
 }
 
 export async function POST(request: Request) {
   const url = new URL(request.url);
-
-  // Prøv at læse body (tåler tom/ugyldig body)
-  let body: any = {};
-  try {
-    body = await request.json();
-  } catch {
-    /* ignore */
-  }
-
-  // Flere måder at tvinge JSON-svar:
-  // 1) ?mode=json i URL
-  // 2) Header: x-debug: json
-  // 3) Body: { "mode": "json" }
-  const modeFromQuery = (url.searchParams.get("mode") || "").toLowerCase();
-  const modeFromHeader = (request.headers.get("x-debug") || "").toLowerCase();
-  const modeFromBody = (String(body?.mode || "") || "").toLowerCase();
-
   const wantJson =
-    modeFromQuery === "json" || modeFromHeader === "json" || modeFromBody === "json";
+    url.searchParams.get("mode") === "json" ||
+    request.headers.get("x-debug") === "json" ||
+    request.headers.get("x-kim-debug") === "json";
 
-  // Simpel “echo” JSON hvis der er bedt om det
+  let body: any = {};
+  try { body = await request.json(); } catch {}
+
+  // Brug enten useChat-format (messages[])
+  // eller en enkel { message: "..." }
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  const lastUser =
+    messages.length > 0
+      ? messages[messages.length - 1]?.content ?? ""
+      : body?.message ?? "";
+
   if (wantJson) {
-    const received =
-      body?.message ??
-      (Array.isArray(body?.messages)
-        ? body.messages[body.messages.length - 1]?.content ?? ""
-        : body);
-    return json({
-      ok: true,
-      handler: "POST-json",
-      reply: `Echo: ${received || "(ingen besked)"}`,
-      received: body,
-    });
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        handler: "POST-json",
+        reply: `Echo: ${lastUser || "ingen besked"}`,
+        received: body,
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   }
 
-  // Ellers: stream ét svar som text/plain (for useChat / UI)
-  const last =
-    Array.isArray(body?.messages) && body.messages.length
-      ? body.messages[body.messages.length - 1]?.content ?? ""
-      : String(body?.message ?? "");
-
+  // --- SSE stream som din UI forventer ---
   const reply =
     `Hej! Jeg er Kim-agenten og jeg virker 👍\n` +
-    `Du skrev: “${last || "(ingen besked)"}”\n\n` +
-    `• Dette svar kommer som en tekst-stream (som useChat forstår).\n` +
-    `• Når vi er klar, kobler vi Kim-profilen og modellen på.`;
+    (lastUser ? `Du skrev: “${lastUser}”\n\n` : `\n`) +
+    `• Dette svar sendes som SSE (assistant:final)\n` +
+    `• Næste trin er at koble Kim-profilen og modellen på.`;
 
   const encoder = new TextEncoder();
+
   const stream = new ReadableStream({
     start(controller) {
-      controller.enqueue(encoder.encode(reply));
+      // 1) Selve assistantsvaret (det UI’et opfanger)
+      const assistantEvent =
+        `event: assistant:final\n` +
+        `data: ${JSON.stringify({
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: reply,
+        })}\n\n`;
+      controller.enqueue(encoder.encode(assistantEvent));
+
+      // (valgfrit) 2) Usage/data
+      const usageEvent =
+        `event: data-usage\n` +
+        `data: ${JSON.stringify({ modelId: "stub", tokens: 0 })}\n\n`;
+      controller.enqueue(encoder.encode(usageEvent));
+
+      // 3) Luk stream pænt
+      const closeEvent = `event: close\ndata: {}\n\n`;
+      controller.enqueue(encoder.encode(closeEvent));
+
       controller.close();
     },
   });
 
   return new Response(stream, {
     status: 200,
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
   });
 }
