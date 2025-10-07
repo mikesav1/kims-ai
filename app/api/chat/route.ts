@@ -3,13 +3,11 @@ export const runtime = "edge";
 
 import { createUIMessageStream, JsonToSseTransformStream } from "ai";
 
-// Lille id-helper uden 'crypto' import (Edge kan ikke importere 'crypto' pakken)
+// Helper til unikke ID’er (uden at bruge 'crypto' pakken)
 function uid() {
-  // globalThis.crypto.randomUUID findes i Edge runtime.
   if (typeof globalThis !== "undefined" && globalThis.crypto?.randomUUID) {
     return globalThis.crypto.randomUUID();
   }
-  // fallback
   return Math.random().toString(36).slice(2);
 }
 
@@ -32,20 +30,19 @@ export async function POST(request: Request) {
     body = await request.json();
   } catch {}
 
-  // useChat sender typisk { messages: [...] }
+  // Brug sidste besked som input
   const msgs = Array.isArray(body?.messages) ? body.messages : [];
-  // prøv både {content} og {parts:[{text}]}
   const lastContent =
     msgs.at(-1)?.content ??
     msgs.at(-1)?.parts?.find((p: any) => p?.type === "text")?.text ??
     "(ingen besked)";
 
-  const reply = `Hej Kim – jeg virker nu og ser: “${lastContent}”. ✅`;
+  const reply = `Hej Kim – jeg virker nu ✅\nDu skrev: “${lastContent}”`;
 
-  // Byg et UI-kompatibelt SSE-stream
+  // Opret UI-kompatibelt stream
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
-      // Send et enkelt 'assistant'-svar som din frontend forstår
+      // Send et svar som useChat forstår
       writer.write({
         type: "data-appendMessage",
         data: JSON.stringify({
@@ -56,11 +53,12 @@ export async function POST(request: Request) {
         }),
       });
 
-      // afslut
-     writer.close();
+      // ✅ Korrekt afslutning af streamen
+      writer.done();
     },
   });
 
+  // Returnér streamen i SSE-format
   return new Response(
     stream.pipeThrough(new JsonToSseTransformStream()),
     {
