@@ -1,92 +1,259 @@
-// app/api/chat/route.ts
-export const runtime = "edge";
+"use client";
 
-type InMsg = { role: "user" | "assistant" | "system"; content: string };
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import useSWR, { useSWRConfig } from "swr";
+import { unstable_serialize } from "swr/infinite";
+import { ChatHeader } from "@/components/chat-header";
 
-function readText(body: any): { lastText: string; all: InMsg[] } {
-  const list: InMsg[] = Array.isArray(body?.messages) ? body.messages : [];
-  const cleaned: InMsg[] = list
-    .filter((m) => m && typeof m.role === "string")
-    .map((m) => ({
-      role: m.role as InMsg["role"],
-      content: (m.content ?? "").toString(),
-    }));
-  const lastText = cleaned.at(-1)?.content ?? "";
-  return { lastText, all: cleaned };
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+import { useArtifactSelector } from "@/hooks/use-artifact";
+import { useAutoResume } from "@/hooks/use-auto-resume";
+import { useChatVisibility } from "@/hooks/use-chat-visibility";
+import type { Vote } from "@/lib/db/schema";
+import { ChatSDKError } from "@/lib/errors";
+import type { Attachment, ChatMessage } from "@/lib/types";
+import type { AppUsage } from "@/lib/usage";
+import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
+import { Artifact } from "./artifact";
+import { useDataStream } from "./data-stream-provider";
+import { Messages } from "./messages";
+import { MultimodalInput } from "./multimodal-input";
+import { getChatHistoryPaginationKey } from "./sidebar-history";
+import { toast } from "./toast";
+import type { VisibilityType } from "./visibility-selector";
+
+/** Saml parts -> content-tekst til API */
+function serializeMessagesForApi(msgs: ChatMessage[]) {
+  return msgs.map((m) => {
+    const text =
+      (m.parts || [])
+        .map((p: any) => (p?.type === "text" ? p.text : ""))
+        .join(" ")
+        .trim() || "";
+    return { role: m.role, content: text };
+  });
 }
 
-export async function POST(req: Request) {
-  let body: any = {};
-  try {
-    body = await req.json();
-  } catch {
-    body = {};
-  }
+export function Chat({
+  id,
+  initialMessages,
+  initialChatModel,
+  initialVisibilityType,
+  isReadonly,
+  autoResume,
+  initialLastContext,
+}: {
+  id: string;
+  initialMessages: ChatMessage[];
+  initialChatModel: string;
+  initialVisibilityType: VisibilityType;
+  isReadonly: boolean;
+  autoResume: boolean;
+  initialLastContext?: AppUsage;
+}) {
+  const { visibilityType } = useChatVisibility({
+    chatId: id,
+    initialVisibilityType,
+  });
 
-  // Læs sidste bruger-besked (til demo-svar)
-  const { lastText } = readText(body);
-  const reply =
-    lastText && lastText.trim()
-      ? `Hej! Du skrev: “${lastText.trim()}”. Her er et streamsvar.`
-      : "Hej! Skriv et spørgsmål – jeg svarer i en stream.";
+  const { mutate } = useSWRConfig();
+  const { setDataStream } = useDataStream();
 
-  const encoder = new TextEncoder();
+  const [input, setInput] = useState<string>("");
+  const [usage, setUsage] = useState<AppUsage | undefined>(initialLastContext);
+  const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
+  const [currentModelId, setCurrentModelId] = useState(initialChatModel);
+  const currentModelIdRef = useRef(currentModelId);
 
-  const stream = new ReadableStream({
-    start(controller) {
-      // lille “typing”-fornemmelse
-      const chunks = reply.split(/(\s+)/).filter(Boolean);
+  useEffect(() => {
+    currentModelIdRef.current = currentModelId;
+  }, [currentModelId]);
 
-      // AI SDK’s transport kan forstå en simpel “text-delta” + “final”
-      controller.enqueue(
-        encoder.encode(
-          `data: ${JSON.stringify({ type: "assistant-start" })}\n\n`
-        )
-      );
+  const {
+    messages,
+    setMessages,
+    sendMessage,
+    status,
+    stop,
+    regenerate,
+    resumeStream,
+  } = useChat<ChatMessage>({
+    id,
+    messages: initialMessages,
+    experimental_throttle: 100,
+    generateId: generateUUID,
+    transport: new DefaultChatTransport({
+      api: "/api/chat",
+      fetch: fetchWithErrorHandlers,
+      prepareSendMessagesRequest(request) {
+        const serialized = serializeMessagesForApi(request.messages || []);
+        const lastMessage = request.messages?.at(-1);
 
-      let i = 0;
-      const tick = () => {
-        if (i >= chunks.length) {
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({ type: "final" })}\n\n`
-            )
-          );
-          controller.close();
-          return;
+        // SIKKERHED: fjern evt. debug-flag som kan snige sig ind
+        const extras = { ...(request.body || {}) } as Record<string, any>;
+        delete extras.mode;
+        delete extras["x-debug"];
+
+        return {
+          body: {
+            id: request.id,
+            message: lastMessage, // kompatibilitet til evt. gammel backend-brug
+            messages: serialized, // foretrukne liste
+            selectedChatModel: currentModelIdRef.current,
+            selectedVisibilityType: visibilityType,
+            ...extras,
+          },
+        };
+      },
+    }),
+    onData: (dataPart) => {
+      setDataStream((ds) => (ds ? [...ds, dataPart] : []));
+      if (dataPart.type === "data-usage") setUsage(dataPart.data);
+    },
+    onFinish: () => {
+      mutate(unstable_serialize(getChatHistoryPaginationKey));
+    },
+    onError: (error) => {
+      if (error instanceof ChatSDKError) {
+        if (error.message?.includes("AI Gateway requires a valid credit card")) {
+          setShowCreditCardAlert(true);
+        } else {
+          toast({ type: "error", description: error.message });
         }
-
-        controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({
-              type: "text-delta",
-              textDelta: chunks[i],
-            })}\n\n`
-          )
-        );
-
-        i += 1;
-        setTimeout(tick, 40);
-      };
-
-      tick();
+      }
     },
   });
 
-  return new Response(stream, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-    },
-  });
-}
+  const searchParams = useSearchParams();
+  const query = searchParams.get("query");
+  const [hasAppendedQuery, setHasAppendedQuery] = useState(false);
 
-// (valgfrit) En simpel GET – hjælper i DevTools, hvis du vil sanity-tjekke endpointet
-export async function GET() {
-  return new Response(
-    JSON.stringify({ ok: true, note: "chat endpoint alive (GET)" }),
-    { status: 200, headers: { "Content-Type": "application/json" } }
+  useEffect(() => {
+    if (query && !hasAppendedQuery) {
+      sendMessage({
+        role: "user" as const,
+        parts: [{ type: "text", text: query }],
+      });
+      setHasAppendedQuery(true);
+      window.history.replaceState({}, "", `/chat/${id}`);
+    }
+  }, [query, sendMessage, hasAppendedQuery, id]);
+
+  const { data: votes } = useSWR<Vote[]>(
+    messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
+    fetcher
+  );
+
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const isArtifactVisible = useArtifactSelector((state) => state.isVisible);
+
+  useAutoResume({
+    autoResume,
+    initialMessages,
+    resumeStream,
+    setMessages,
+  });
+
+  return (
+    <>
+      <div className="overscroll-behavior-contain flex h-dvh min-w-0 touch-pan-y flex-col bg-background">
+        <ChatHeader
+          chatId={id}
+          isReadonly={isReadonly}
+          selectedVisibilityType={initialVisibilityType}
+        />
+
+        <Messages
+          chatId={id}
+          isArtifactVisible={isArtifactVisible}
+          isReadonly={isReadonly}
+          messages={messages}
+          regenerate={regenerate}
+          selectedModelId={initialChatModel}
+          setMessages={setMessages}
+          status={status}
+          votes={votes}
+        />
+
+        <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4">
+          {!isReadonly && (
+            <MultimodalInput
+              attachments={attachments}
+              chatId={id}
+              input={input}
+              messages={messages}
+              onModelChange={setCurrentModelId}
+              selectedModelId={currentModelId}
+              selectedVisibilityType={visibilityType}
+              sendMessage={sendMessage}
+              setAttachments={setAttachments}
+              setInput={setInput}
+              setMessages={setMessages}
+              status={status}
+              stop={stop}
+              usage={usage}
+            />
+          )}
+        </div>
+      </div>
+
+      <Artifact
+        attachments={attachments}
+        chatId={id}
+        input={input}
+        isReadonly={isReadonly}
+        messages={messages}
+        regenerate={regenerate}
+        selectedModelId={currentModelId}
+        selectedVisibilityType={visibilityType}
+        sendMessage={sendMessage}
+        setAttachments={setAttachments}
+        setInput={setInput}
+        setMessages={setMessages}
+        status={status}
+        stop={stop}
+        votes={votes}
+      />
+
+      <AlertDialog onOpenChange={setShowCreditCardAlert} open={showCreditCardAlert}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Activate AI Gateway</AlertDialogTitle>
+            <AlertDialogDescription>
+              This application requires{" "}
+              {process.env.NODE_ENV === "production" ? "the owner" : "you"} to
+              activate Vercel AI Gateway.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                window.open(
+                  "https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%3Fmodal%3Dadd-credit-card",
+                  "_blank"
+                );
+                window.location.href = "/";
+              }}
+            >
+              Activate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
