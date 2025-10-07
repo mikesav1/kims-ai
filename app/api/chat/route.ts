@@ -1,11 +1,44 @@
 // app/api/chat/route.ts
 export const runtime = "edge";
 
-type UIMessage = {
-  role: "user" | "assistant" | "system";
-  content?: string; // hvis du bruger 'content' (plain useChat)
-  parts?: Array<{ type: "text"; text: string }>; // hvis du bruger 'parts'
-};
+type IncomingPart = { type: string; text?: string };
+type IncomingMsg =
+  | { role: string; parts?: IncomingPart[] }
+  | { role: string; content?: string }; // fallback, hvis nogen sender content:string
+
+function pickLastUserText(body: any): string {
+  // 1) Hvis frontend har sendt den serialiserede liste:
+  if (Array.isArray(body?.messages) && body.messages.length) {
+    const last = body.messages[body.messages.length - 1];
+    const text =
+      (last?.content as string) ??
+      ((last?.parts || [])
+        .map((p: IncomingPart) => (p?.type === "text" ? p.text || "" : ""))
+        .join(" ")
+        .trim());
+    if (typeof text === "string" && text.length) return text;
+  }
+
+  // 2) Hvis frontend (eller noget ældre kode) har sendt "message" i din gamle form:
+  const m = body?.message as IncomingMsg | undefined;
+  if (m) {
+    const fromParts =
+      (m as any)?.parts
+        ?.map((p: IncomingPart) => (p?.type === "text" ? p.text || "" : ""))
+        .join(" ")
+        .trim() || "";
+    const fromContent = (m as any)?.content || "";
+    const text = (fromParts || fromContent || "").trim();
+    if (text) return text;
+  }
+
+  return "";
+}
+
+function uuid() {
+  // Kører fint på edge (Web Crypto API)
+  return crypto.randomUUID();
+}
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -25,45 +58,22 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    // ignore
+    // tomt body er ok
   }
 
-  // 🔴 TVING JSON-MODE når vi beder om det fra UI (via header eller body)
-  const wantsJson =
-    request.headers.get("x-debug") === "json" || body?.mode === "json";
+  // Vi tvinger JSON-svar (matcher din frontend, der sender x-debug + mode=json)
+  const userText = pickLastUserText(body);
+  const reply =
+    userText && userText.length
+      ? `Hej! Jeg hørte: “${userText}”. Jeg virker ✅`
+      : "Hej! Jeg virker ✅ – sig noget, så svarer jeg.";
 
-  if (wantsJson) {
-    // prøv at udlede sidste brugerbesked (understøtter både 'messages[].content' og 'message.parts[0].text')
-    const lastFromMessagesContent =
-      Array.isArray(body?.messages) && body.messages.length
-        ? (body.messages as UIMessage[]).at(-1)?.content ?? ""
-        : "";
+  // Form som DefaultChatTransport kan læse uden streaming:
+  const msg = {
+    id: uuid(),
+    role: "assistant",
+    parts: [{ type: "text", text: reply }],
+  };
 
-    const lastFromMessageParts =
-      body?.message?.parts?.[0]?.text ??
-      body?.messages?.at?.(-1)?.parts?.[0]?.text ??
-      "";
-
-    const last = lastFromMessagesContent || lastFromMessageParts || "";
-
-    return Response.json(
-      {
-        ok: true,
-        handler: "POST-json",
-        reply: last ? `Echo: ${last}` : "Echo: (ingen besked)",
-        received: body,
-      },
-      { status: 200 }
-    );
-  }
-
-  // 🟡 Her kan din rigtige stream-løsning ligge senere.
-  // Mens vi fejlsøger UI, holder vi os til JSON-svar:
-  return Response.json(
-    {
-      ok: true,
-      note: "chat endpoint alive (stream midlertidigt slået fra)",
-    },
-    { status: 200 }
-  );
+  return Response.json({ messages: [msg] }, { status: 200 });
 }
