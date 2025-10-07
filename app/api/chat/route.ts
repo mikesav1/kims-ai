@@ -1,79 +1,92 @@
 // app/api/chat/route.ts
 export const runtime = "edge";
 
-type IncomingPart = { type: string; text?: string };
-type IncomingMsg =
-  | { role: string; parts?: IncomingPart[] }
-  | { role: string; content?: string }; // fallback, hvis nogen sender content:string
+type InMsg = { role: "user" | "assistant" | "system"; content: string };
 
-function pickLastUserText(body: any): string {
-  // 1) Hvis frontend har sendt den serialiserede liste:
-  if (Array.isArray(body?.messages) && body.messages.length) {
-    const last = body.messages[body.messages.length - 1];
-    const text =
-      (last?.content as string) ??
-      ((last?.parts || [])
-        .map((p: IncomingPart) => (p?.type === "text" ? p.text || "" : ""))
-        .join(" ")
-        .trim());
-    if (typeof text === "string" && text.length) return text;
-  }
-
-  // 2) Hvis frontend (eller noget ældre kode) har sendt "message" i din gamle form:
-  const m = body?.message as IncomingMsg | undefined;
-  if (m) {
-    const fromParts =
-      (m as any)?.parts
-        ?.map((p: IncomingPart) => (p?.type === "text" ? p.text || "" : ""))
-        .join(" ")
-        .trim() || "";
-    const fromContent = (m as any)?.content || "";
-    const text = (fromParts || fromContent || "").trim();
-    if (text) return text;
-  }
-
-  return "";
+function readText(body: any): { lastText: string; all: InMsg[] } {
+  const list: InMsg[] = Array.isArray(body?.messages) ? body.messages : [];
+  const cleaned: InMsg[] = list
+    .filter((m) => m && typeof m.role === "string")
+    .map((m) => ({
+      role: m.role as InMsg["role"],
+      content: (m.content ?? "").toString(),
+    }));
+  const lastText = cleaned.at(-1)?.content ?? "";
+  return { lastText, all: cleaned };
 }
 
-function uuid() {
-  // Kører fint på edge (Web Crypto API)
-  return crypto.randomUUID();
-}
-
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  return Response.json(
-    {
-      ok: true,
-      handler: "GET",
-      path: url.pathname + url.search,
-      note: "chat GET ok",
-    },
-    { status: 200 }
-  );
-}
-
-export async function POST(request: Request) {
+export async function POST(req: Request) {
   let body: any = {};
   try {
-    body = await request.json();
+    body = await req.json();
   } catch {
-    // tomt body er ok
+    body = {};
   }
 
-  // Vi tvinger JSON-svar (matcher din frontend, der sender x-debug + mode=json)
-  const userText = pickLastUserText(body);
+  // Læs sidste bruger-besked (til demo-svar)
+  const { lastText } = readText(body);
   const reply =
-    userText && userText.length
-      ? `Hej! Jeg hørte: “${userText}”. Jeg virker ✅`
-      : "Hej! Jeg virker ✅ – sig noget, så svarer jeg.";
+    lastText && lastText.trim()
+      ? `Hej! Du skrev: “${lastText.trim()}”. Her er et streamsvar.`
+      : "Hej! Skriv et spørgsmål – jeg svarer i en stream.";
 
-  // Form som DefaultChatTransport kan læse uden streaming:
-  const msg = {
-    id: uuid(),
-    role: "assistant",
-    parts: [{ type: "text", text: reply }],
-  };
+  const encoder = new TextEncoder();
 
-  return Response.json({ messages: [msg] }, { status: 200 });
+  const stream = new ReadableStream({
+    start(controller) {
+      // lille “typing”-fornemmelse
+      const chunks = reply.split(/(\s+)/).filter(Boolean);
+
+      // AI SDK’s transport kan forstå en simpel “text-delta” + “final”
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({ type: "assistant-start" })}\n\n`
+        )
+      );
+
+      let i = 0;
+      const tick = () => {
+        if (i >= chunks.length) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({ type: "final" })}\n\n`
+            )
+          );
+          controller.close();
+          return;
+        }
+
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              type: "text-delta",
+              textDelta: chunks[i],
+            })}\n\n`
+          )
+        );
+
+        i += 1;
+        setTimeout(tick, 40);
+      };
+
+      tick();
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
+}
+
+// (valgfrit) En simpel GET – hjælper i DevTools, hvis du vil sanity-tjekke endpointet
+export async function GET() {
+  return new Response(
+    JSON.stringify({ ok: true, note: "chat endpoint alive (GET)" }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
 }
