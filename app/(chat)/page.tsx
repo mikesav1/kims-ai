@@ -6,10 +6,6 @@ import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
 import { generateUUID } from "@/lib/utils";
 import { auth } from "../(auth)/auth";
 
-import TTSButtons from "./TTSButtons";
-import AutoSpeakObserver from "./AutoSpeakObserver"; 
-import AutoSpeakDOM from "./AutoSpeakDOM";   // 👈 NY fallback
-
 export default async function Page() {
   const session = await auth();
 
@@ -38,15 +34,8 @@ export default async function Page() {
       />
       <DataStreamHandler />
 
-      {/* TTS UI */}
-      <div className="mt-4 space-y-3">
-        <TTSButtons />
-        <AutoSpeakObserver />   {/* bruger 'assistant:final' event */}
-        <AutoSpeakDOM />        {/* fallback: scanner DOM for sidste assistent-svar */}
-      </div>
-
-      <div className="text-xs opacity-60">
-        AutoSpeak v3 • build check
+      <div className="text-xs opacity-60 mt-4">
+        Chatbot aktiv • TTS fjernet
       </div>
     </>
   );
