@@ -7,17 +7,21 @@ import { unstable_serialize } from "swr/infinite";
 
 import { ChatHeader } from "@/components/chat-header";
 import { MultimodalInput } from "./multimodal-input";
-import { Messages } from "./messages"; // ⬅️ Fjernet ChatStatus-typen
+import { Messages } from "./messages";
 import { Artifact } from "./artifact";
+
 import { useArtifactSelector } from "@/hooks/use-artifact";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
+
 import type { ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import type { VisibilityType } from "./visibility-selector";
+
 import { fetcher, generateUUID } from "@/lib/utils";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 
-/** Hjælper: lav en assistentbesked */
+/* ---------- små hjælpere ---------- */
+
 function toAssistantMessage(text: string): ChatMessage {
   return {
     id: generateUUID(),
@@ -26,7 +30,6 @@ function toAssistantMessage(text: string): ChatMessage {
   } as ChatMessage;
 }
 
-/** Hjælper: konverter ChatMessage[] → API-format */
 function serializeMessagesForApi(msgs: ChatMessage[]) {
   return msgs.map((m) => {
     const text =
@@ -38,14 +41,16 @@ function serializeMessagesForApi(msgs: ChatMessage[]) {
   });
 }
 
+/* ---------- selve komponenten ---------- */
+
 export function Chat({
   id,
   initialMessages,
   initialChatModel,
   initialVisibilityType,
   isReadonly,
-  autoResume,
-  initialLastContext,
+  autoResume,              // ikke brugt i debug-varianten
+  initialLastContext,      // ikke brugt i debug-varianten
 }: {
   id: string;
   initialMessages: ChatMessage[];
@@ -63,12 +68,12 @@ export function Chat({
   const [input, setInput] = useState<string>("");
   const [status, setStatus] = useState<"idle" | "submitting">("idle");
 
-  // Hent votes når der er nok beskeder
+  // Hent votes når der er 2+ beskeder (valgfrit i debug)
   useSWR(messages.length >= 2 ? `/api/vote?chatId=${id}` : null, fetcher);
 
-  // 🔹 Send i debug-mode til /api/chat?mode=json
   async function sendMessageDebug(userText: string) {
     if (!userText.trim()) return;
+
     setStatus("submitting");
 
     const userMsg: ChatMessage = {
@@ -81,6 +86,7 @@ export function Chat({
 
     try {
       const current = [...messages, userMsg];
+
       const payload = {
         id,
         message: userMsg,
@@ -96,14 +102,15 @@ export function Chat({
         body: JSON.stringify(payload),
       });
 
+      // svar i debug-JSON
       const data = await res.json().catch(() => ({} as any));
-      const replyText: string =
+      const replyText =
         typeof data?.reply === "string"
           ? data.reply
           : "Hej! (debug) – ingen tekst fra serveren.";
 
       setMessages((prev) => [...prev, toAssistantMessage(replyText)]);
-    } catch (err) {
+    } catch {
       setMessages((prev) => [
         ...prev,
         toAssistantMessage("Ups – der skete en fejl i forbindelsen."),
@@ -114,10 +121,10 @@ export function Chat({
     }
   }
 
-  // Auto-send hvis ?query= i URL
   const searchParams = useSearchParams();
   const query = searchParams.get("query");
   const hasHandledQueryRef = useRef(false);
+
   useEffect(() => {
     if (query && !hasHandledQueryRef.current) {
       hasHandledQueryRef.current = true;
@@ -126,12 +133,12 @@ export function Chat({
     }
   }, [query, id]);
 
-  // Regenerate: krav fra Messages, men vi gør intet i debug-mode
+  // opfylder prop-signatur, men gør ikke noget i debug
   const regenerateAsync = async (): Promise<void> => {
     return;
   };
 
-  // Map vores lokale status til det Messages forventer (bruger any for at slippe for ChatStatus-typen)
+  // Messages forventer en status-prop; vi caster til any for at undgå ChatStatus-typen
   const uiStatus = (status === "submitting" ? "loading" : "idle") as any;
 
   return (
@@ -151,8 +158,8 @@ export function Chat({
           regenerate={regenerateAsync}
           selectedModelId={initialChatModel}
           setMessages={setMessages}
-          status={uiStatus}         {/* ⬅️ ingen import af ChatStatus */}
-          votes={[]}                {/* tom i debug-mode */}
+          status={uiStatus}
+          votes={[]}
         />
 
         <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4">
