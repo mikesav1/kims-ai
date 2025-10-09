@@ -1,10 +1,10 @@
 // app/api/chat/route.ts
 export const runtime = "edge";
 
-import { createUIMessageStream } from "ai"; // Vercel AI SDK – UI-stream
+import { createUIMessageStream } from "ai";
 
 export async function POST(req: Request) {
-  // Læs body (robust, da nogle browsere sender tom body på første kald)
+  // Læs body sikkert
   let body: any = {};
   try {
     body = await req.json();
@@ -12,7 +12,7 @@ export async function POST(req: Request) {
     body = {};
   }
 
-  // Find sidste brugerbesked i både "messages" og "message.parts"
+  // Træk sidste brugerbesked ud (både fra messages[] og message.parts)
   const lastFromList =
     Array.isArray(body?.messages) && body.messages.length > 0
       ? String(body.messages.at(-1)?.content ?? "")
@@ -28,20 +28,19 @@ export async function POST(req: Request) {
 
   const last = (lastFromList || lastFromParts || "").trim();
 
-  // Opret UI-streamen (i din SDK-version returneres KUN streamen)
-  const stream = createUIMessageStream();
-  const writer = stream.getWriter(); // <- hent writer via getWriter()
+  // ⬇️ Din SDK kræver et argument → giv et tomt options-objekt
+  const stream = createUIMessageStream({});
+  const writer = stream.getWriter();
 
-  // Skriv UI-events asynkront og luk streamen korrekt
   (async () => {
-    // Start en assistent-besked
+    // Start én assistent-besked
     await writer.write({
       type: "assistant-message",
       id: crypto.randomUUID(),
       role: "assistant",
     });
 
-    // Tekst-deltas (UI’et bygger boblen løbende)
+    // Deltas (UI bygger teksten løbende)
     await writer.write({ type: "assistant-text-delta", text: "Hej! " });
     await writer.write({ type: "assistant-text-delta", text: "Jeg virker ✅" });
 
@@ -52,23 +51,22 @@ export async function POST(req: Request) {
       });
     }
 
-    // Marker at denne assistent-besked er færdig
+    // Afslut beskeden
     await writer.write({ type: "assistant-message-finished" });
 
-    // (valgfrit) metadata/usage
+    // (valgfrit) metadata
     await writer.write({ type: "data", data: { ok: true } });
 
-    // VIGTIGT: signalér at hele streamen er færdig
+    // Signalér at streamen er helt færdig
     await writer.write({ type: "data-done" });
 
-    // Luk streamen – ellers hænger UI’et med “Please wait…”
+    // Luk streamen (ellers hænger UI’et på “Please wait…”)
     await writer.close();
   })();
 
   return new Response(stream as any, {
     status: 200,
     headers: {
-      // Nødvendig content-type for AI UI-stream
       "Content-Type": "text/x-aiui-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
