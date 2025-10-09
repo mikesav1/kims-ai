@@ -56,20 +56,27 @@ function serializeMessagesForApi(msgs: ChatMessage[]) {
 
 /** Udtræk ren tekst fra en "message-like" – både parts[] og content-fallback */
 function extractPlainText(messageLike: any): string {
-  // parts[] som primær (samme struktur som ChatMessage)
-  const fromParts = Array.isArray(messageLike?.parts)
-    ? messageLike.parts
-        .map((p: any) => (p?.type === "text" ? p.text : ""))
-        .join(" ")
-        .trim()
-    : "";
-
-  if (fromParts) return fromParts;
-
-  // Fallback: enkelte inputs kan sende { content: "..." }
-  if (typeof messageLike?.content === "string") return messageLike.content.trim();
-
+  // Primært: parts[]
+  if (Array.isArray(messageLike?.parts)) {
+    const txt = messageLike.parts
+      .map((p: any) => (p?.type === "text" ? p.text : ""))
+      .join(" ")
+      .trim();
+    if (txt) return txt;
+  }
+  // Fallback: content
+  if (typeof messageLike?.content === "string") {
+    return messageLike.content.trim();
+  }
   return "";
+}
+
+/** Normalisér status til 'idle' | 'submitting' | 'loading' uden at skændes med TS */
+function normalizeStatus(s: unknown): "idle" | "submitting" | "loading" {
+  const v = String(s);
+  if (v === "submitting") return "submitting";
+  if (v === "loading") return "loading";
+  return "idle";
 }
 
 /* ────────────────────────────────────────────────────────── */
@@ -112,7 +119,7 @@ export function Chat({
     currentModelIdRef.current = currentModelId;
   }, [currentModelId]);
 
-  /* chat-machine */
+  /* chat-maskinen */
   const {
     messages,
     setMessages,
@@ -130,16 +137,13 @@ export function Chat({
       api: "/api/chat",
       fetch: fetchWithErrorHandlers,
       prepareSendMessagesRequest(request) {
-        // Send både den sidste besked og en serialiseret liste,
-        // så /api/chat kan håndtere begge dele robust.
         const serialized = serializeMessagesForApi(request.messages || []);
         const lastMessage = request.messages?.at(-1);
-
         return {
           body: {
             id: request.id,
-            message: lastMessage, // behold hvis noget backend kigger efter den
-            messages: serialized, // eksplicit liste med {role, content}
+            message: lastMessage, // behold for kompatibilitet
+            messages: serialized, // eksplicit liste
             selectedChatModel: currentModelIdRef.current,
             selectedVisibilityType: visibilityType,
             ...request.body,
@@ -178,13 +182,12 @@ export function Chat({
         role: "user" as const,
         parts: [{ type: "text", text: query }],
       });
-
       setHasAppendedQuery(true);
       window.history.replaceState({}, "", `/chat/${id}`);
     }
   }, [query, hasAppendedQuery, id, sendMessage]);
 
-  /* votes (kan være tomt – det er fint) */
+  /* votes (må gerne være tom) */
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
     fetcher
@@ -193,7 +196,7 @@ export function Chat({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const isArtifactVisible = useArtifactSelector((state) => state.isVisible);
 
-  /* auto resume (når sideload) */
+  /* auto resume */
   useAutoResume({
     autoResume,
     initialMessages,
@@ -212,8 +215,8 @@ export function Chat({
     } as ChatMessage);
   }
 
-  /* UI-status som simpel streng (vi bruger ikke ChatStatus type) */
-  const uiStatus = status === "submitting" ? "submitting" : status === "loading" ? "loading" : "idle";
+  /* brug en sikker, string-baseret status til UI */
+  const uiStatus = normalizeStatus(status);
 
   return (
     <>
@@ -246,9 +249,7 @@ export function Chat({
               onModelChange={setCurrentModelId}
               selectedModelId={currentModelId}
               selectedVisibilityType={visibilityType}
-              /* ーーーーーーーーーーーーーーーーーーーーーーーーーーーーーー
-                 VIGTIGT FIX: håndterer både parts[] og content-fallback
-                 ーーーーーーーーーーーーーーーーーーーーーーーーーーーーーー */
+              /* VIGTIGT: håndter både parts[] og content-fallback */
               sendMessage={async (messageLike: any) => {
                 const text = extractPlainText(messageLike);
                 if (!text) return;
