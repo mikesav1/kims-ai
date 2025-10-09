@@ -4,7 +4,7 @@ export const runtime = "edge";
 import { createUIMessageStream } from "ai";
 
 export async function POST(req: Request) {
-  // Læs body sikkert
+  // --- Læs og normalisér body ---------------------------------------------
   let body: any = {};
   try {
     body = await req.json();
@@ -12,7 +12,7 @@ export async function POST(req: Request) {
     body = {};
   }
 
-  // Træk sidste brugerbesked ud (både fra messages[] og message.parts)
+  // Sidste brugerbesked – understøt både messages[] og message.parts
   const lastFromList =
     Array.isArray(body?.messages) && body.messages.length > 0
       ? String(body.messages.at(-1)?.content ?? "")
@@ -28,42 +28,44 @@ export async function POST(req: Request) {
 
   const last = (lastFromList || lastFromParts || "").trim();
 
-  // ⬇️ Din SDK kræver et argument → giv et tomt options-objekt
-  const stream = createUIMessageStream({});
-  const writer = stream.getWriter();
+  // --- Opret UI-streamen med execute({ writer }) ---------------------------
+  const stream = createUIMessageStream({
+    async execute({ writer }) {
+      // Start én assistent-besked
+      await writer.write({
+        type: "assistant-message",
+        id: crypto.randomUUID(),
+        role: "assistant",
+      });
 
-  (async () => {
-    // Start én assistent-besked
-    await writer.write({
-      type: "assistant-message",
-      id: crypto.randomUUID(),
-      role: "assistant",
-    });
-
-    // Deltas (UI bygger teksten løbende)
-    await writer.write({ type: "assistant-text-delta", text: "Hej! " });
-    await writer.write({ type: "assistant-text-delta", text: "Jeg virker ✅" });
-
-    if (last) {
+      // Skriv løbende tekst (deltas)
       await writer.write({
         type: "assistant-text-delta",
-        text: ` — du skrev: “${last}”.`,
+        text: "Hej! Jeg virker ✅",
       });
-    }
 
-    // Afslut beskeden
-    await writer.write({ type: "assistant-message-finished" });
+      if (last) {
+        await writer.write({
+          type: "assistant-text-delta",
+          text: ` — du skrev: “${last}”.`,
+        });
+      }
 
-    // (valgfrit) metadata
-    await writer.write({ type: "data", data: { ok: true } });
+      // Afslut beskeden
+      await writer.write({ type: "assistant-message-finished" });
 
-    // Signalér at streamen er helt færdig
-    await writer.write({ type: "data-done" });
+      // Valgfri metadata (frontend kan lytte på 'data')
+      await writer.write({ type: "data", data: { ok: true } });
 
-    // Luk streamen (ellers hænger UI’et på “Please wait…”)
-    await writer.close();
-  })();
+      // Signalér at alt er færdigt (frontend stopper spinner)
+      await writer.write({ type: "data-done" });
 
+      // Luk streamen! (ellers hænger UI’et på “Please wait…”)
+      await writer.close();
+    },
+  });
+
+  // Returnér streamen til UI
   return new Response(stream as any, {
     status: 200,
     headers: {
