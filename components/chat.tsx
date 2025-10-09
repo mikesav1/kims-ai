@@ -152,7 +152,7 @@ export function Chat({
           isArtifactVisible={isArtifactVisible}
           isReadonly={isReadonly}
           messages={messages}
-          regenerate={regenerateAsync}   {/* <- async Promise<void> */}
+          regenerate={regenerateAsync}
           selectedModelId={initialChatModel}
           setMessages={setMessages}
           status={status}
