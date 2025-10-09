@@ -4,7 +4,7 @@ export const runtime = "edge";
 import { createUIMessageStream } from "ai";
 
 export async function POST(req: Request) {
-  // --- Læs og normalisér body ---------------------------------------------
+  // ——— Parse body og find sidste brugerbesked ————————————————
   let body: any = {};
   try {
     body = await req.json();
@@ -12,7 +12,6 @@ export async function POST(req: Request) {
     body = {};
   }
 
-  // Sidste brugerbesked – understøt både messages[] og message.parts
   const lastFromList =
     Array.isArray(body?.messages) && body.messages.length > 0
       ? String(body.messages.at(-1)?.content ?? "")
@@ -28,44 +27,32 @@ export async function POST(req: Request) {
 
   const last = (lastFromList || lastFromParts || "").trim();
 
-  // --- Opret UI-streamen med execute({ writer }) ---------------------------
+  // ——— Opret UI-stream med kun de godkendte event-typer ——————————
   const stream = createUIMessageStream({
     async execute({ writer }) {
-      // Start én assistent-besked
-      await writer.write({
-        type: "assistant-message",
-        id: crypto.randomUUID(),
-        role: "assistant",
-      });
+      // 1) signalér start (nogle UI’er viser status-spinner på "start")
+      await writer.write({ type: "start" });
 
-      // Skriv løbende tekst (deltas)
-      await writer.write({
-        type: "assistant-text-delta",
-        text: "Hej! Jeg virker ✅",
-      });
-
+      // 2) send tekst som deltas
+      await writer.write({ type: "text-delta", text: "Hej! Jeg virker ✅" });
       if (last) {
         await writer.write({
-          type: "assistant-text-delta",
+          type: "text-delta",
           text: ` — du skrev: “${last}”.`,
         });
       }
 
-      // Afslut beskeden
-      await writer.write({ type: "assistant-message-finished" });
+      // 3) afslut tekst
+      await writer.write({ type: "text-end" });
 
-      // Valgfri metadata (frontend kan lytte på 'data')
-      await writer.write({ type: "data", data: { ok: true } });
+      // 4) og afslut hele svaret
+      await writer.write({ type: "finish" });
 
-      // Signalér at alt er færdigt (frontend stopper spinner)
-      await writer.write({ type: "data-done" });
-
-      // Luk streamen! (ellers hænger UI’et på “Please wait…”)
+      // Luk streamen (ellers hænger UI’et på “Please wait…”)
       await writer.close();
     },
   });
 
-  // Returnér streamen til UI
   return new Response(stream as any, {
     status: 200,
     headers: {
