@@ -11,24 +11,22 @@ import { Messages } from "./messages";
 import { Artifact } from "./artifact";
 import { useArtifactSelector } from "@/hooks/use-artifact";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
-import type { Attachment, ChatMessage } from "@/lib/types";
+import type { ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import type { VisibilityType } from "./visibility-selector";
 import { fetcher, generateUUID } from "@/lib/utils";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 
-/** Lille hjælper: lav et ChatMessage (assistant) ud fra plain tekst */
+/** Hjælper: lav en assistentbesked (uden createdAt/attachments) */
 function toAssistantMessage(text: string): ChatMessage {
   return {
     id: generateUUID(),
     role: "assistant",
     parts: [{ type: "text", text }],
-    createdAt: new Date(),
-    attachments: [],
-  };
+  } as ChatMessage;
 }
 
-/** Brug samme format som resten af app’en: ChatMessage[] → {role, content}[]  */
+/** Hjælper: konverter ChatMessage[] → API-format (role + content) */
 function serializeMessagesForApi(msgs: ChatMessage[]) {
   return msgs.map((m) => {
     const text =
@@ -62,30 +60,28 @@ export function Chat({
   const { mutate } = useSWRConfig();
 
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages || []);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [input, setInput] = useState<string>("");
-  const [status, setStatus] = useState<"idle"|"submitting">("idle");
+  const [status, setStatus] = useState<"idle" | "submitting">("idle");
 
-  // (valgfrit) – hvis du havde votes / usage, kan det blive stående
+  // (valgfrit — behold for konsistens)
   useSWR(messages.length >= 2 ? `/api/vote?chatId=${id}` : null, fetcher);
 
-  /** Midlertidig: debug-afsender, der kalder /api/chat?mode=json og appender svaret selv */
+  /** Midlertidig debug-funktion: kalder /api/chat?mode=json */
   async function sendMessageDebug(userText: string) {
     if (!userText.trim()) return;
     setStatus("submitting");
 
-    // 1) append user message lokalt
+    // 1) Tilføj brugerbesked lokalt
     const userMsg: ChatMessage = {
       id: generateUUID(),
       role: "user",
       parts: [{ type: "text", text: userText }],
-      createdAt: new Date(),
-      attachments: [],
-    };
+    } as ChatMessage;
+
     setMessages((prev) => [...prev, userMsg]);
 
     try {
-      // 2) kald API i json-debug
+      // 2) Kald API i debug-mode
       const current = [...messages, userMsg];
       const payload = {
         id,
@@ -102,7 +98,7 @@ export function Chat({
         body: JSON.stringify(payload),
       });
 
-      // 3) læs svar og append assistant
+      // 3) Læs svar og tilføj assistentbesked
       const data = await res.json().catch(() => ({} as any));
       const replyText: string =
         typeof data?.reply === "string"
@@ -147,7 +143,7 @@ export function Chat({
           isArtifactVisible={isArtifactVisible}
           isReadonly={isReadonly}
           messages={messages}
-          regenerate={() => { /* kan laves senere */ }}
+          regenerate={() => {}}
           selectedModelId={initialChatModel}
           setMessages={setMessages}
           status={status}
@@ -157,7 +153,7 @@ export function Chat({
         <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4">
           {!isReadonly && (
             <MultimodalInput
-              attachments={attachments}
+              attachments={[]} // ikke i brug nu
               chatId={id}
               input={input}
               messages={messages}
@@ -168,7 +164,7 @@ export function Chat({
                 await sendMessageDebug(content);
                 setInput("");
               }}
-              setAttachments={setAttachments}
+              setAttachments={() => {}}
               setInput={setInput}
               setMessages={setMessages}
               status={status}
@@ -180,7 +176,7 @@ export function Chat({
       </div>
 
       <Artifact
-        attachments={attachments}
+        attachments={[]} // placeholder
         chatId={id}
         input={input}
         isReadonly={isReadonly}
@@ -189,7 +185,7 @@ export function Chat({
         selectedModelId={initialChatModel}
         selectedVisibilityType={visibilityType}
         sendMessage={async () => {}}
-        setAttachments={setAttachments}
+        setAttachments={() => {}}
         setInput={setInput}
         setMessages={setMessages}
         status={status}
