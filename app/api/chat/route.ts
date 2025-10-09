@@ -4,13 +4,11 @@ export const runtime = "edge";
 import { createUIMessageStream } from "ai";
 
 export async function POST(req: Request) {
-  // Parse body og find sidste brugerbesked (både useChat-format og din egen)
+  // Læs body og find sidste brugerbesked uanset frontend-format
   let body: any = {};
   try {
     body = await req.json();
-  } catch {
-    body = {};
-  }
+  } catch {}
 
   const lastFromList =
     Array.isArray(body?.messages) && body.messages.length > 0
@@ -27,20 +25,38 @@ export async function POST(req: Request) {
 
   const last = (lastFromList || lastFromParts || "").trim();
 
-  // Stream kun med events din SDK-version kender: start → text-delta → text-end → finish
+  // Ét id for hele svaret (krævet af din SDK for text-delta)
+  const msgId =
+    (globalThis as any).crypto?.randomUUID?.() ??
+    Math.random().toString(36).slice(2);
+
   const stream = createUIMessageStream({
     async execute({ writer }) {
+      // Start stream
       await writer.write({ type: "start" });
 
-      await writer.write({ type: "text-delta", delta: "Hej! Jeg virker ✅" });
+      // Tekst starter (valgfri, men god praksis)
+      await writer.write({ type: "text-start", id: msgId });
+
+      // Selve teksten sendes som "text-delta" – med id
+      await writer.write({
+        type: "text-delta",
+        id: msgId,
+        delta: "Hej! Jeg virker ✅",
+      });
+
       if (last) {
         await writer.write({
           type: "text-delta",
+          id: msgId,
           delta: ` — du skrev: “${last}”.`,
         });
       }
 
-      await writer.write({ type: "text-end" });
+      // Afslut tekst for denne besked
+      await writer.write({ type: "text-end", id: msgId });
+
+      // Hele UI-svaret er færdigt
       await writer.write({ type: "finish" });
 
       await writer.close();
