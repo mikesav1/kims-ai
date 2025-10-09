@@ -7,7 +7,7 @@ import { unstable_serialize } from "swr/infinite";
 
 import { ChatHeader } from "@/components/chat-header";
 import { MultimodalInput } from "./multimodal-input";
-import { Messages, type ChatStatus } from "./messages";
+import { Messages } from "./messages"; // ⬅️ Fjernet ChatStatus-typen
 import { Artifact } from "./artifact";
 import { useArtifactSelector } from "@/hooks/use-artifact";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
@@ -63,9 +63,10 @@ export function Chat({
   const [input, setInput] = useState<string>("");
   const [status, setStatus] = useState<"idle" | "submitting">("idle");
 
+  // Hent votes når der er nok beskeder
   useSWR(messages.length >= 2 ? `/api/vote?chatId=${id}` : null, fetcher);
 
-  // 🔹 Hjælpefunktion: send debug-request til dit API
+  // 🔹 Send i debug-mode til /api/chat?mode=json
   async function sendMessageDebug(userText: string) {
     if (!userText.trim()) return;
     setStatus("submitting");
@@ -99,7 +100,7 @@ export function Chat({
       const replyText: string =
         typeof data?.reply === "string"
           ? data.reply
-          : "Hej! (debug) – intet svar fra serveren.";
+          : "Hej! (debug) – ingen tekst fra serveren.";
 
       setMessages((prev) => [...prev, toAssistantMessage(replyText)]);
     } catch (err) {
@@ -113,7 +114,7 @@ export function Chat({
     }
   }
 
-  // Hvis URL har ?query=, så send den automatisk
+  // Auto-send hvis ?query= i URL
   const searchParams = useSearchParams();
   const query = searchParams.get("query");
   const hasHandledQueryRef = useRef(false);
@@ -125,13 +126,13 @@ export function Chat({
     }
   }, [query, id]);
 
-  // ✅ Async regenerate (krævet af Messages)
+  // Regenerate: krav fra Messages, men vi gør intet i debug-mode
   const regenerateAsync = async (): Promise<void> => {
     return;
   };
 
-  // ✅ Konverter vores status til typen ChatStatus
-  const uiStatus: ChatStatus = status === "submitting" ? "loading" : "idle";
+  // Map vores lokale status til det Messages forventer (bruger any for at slippe for ChatStatus-typen)
+  const uiStatus = (status === "submitting" ? "loading" : "idle") as any;
 
   return (
     <>
@@ -150,8 +151,8 @@ export function Chat({
           regenerate={regenerateAsync}
           selectedModelId={initialChatModel}
           setMessages={setMessages}
-          status={uiStatus}
-          votes={[]}
+          status={uiStatus}         {/* ⬅️ ingen import af ChatStatus */}
+          votes={[]}                {/* tom i debug-mode */}
         />
 
         <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4">
