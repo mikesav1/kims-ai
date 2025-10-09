@@ -1,20 +1,18 @@
 // app/api/chat/route.ts
 export const runtime = "edge";
 
-// Lille helper til at sende SSE-linjer
-function sseLine(data: string) {
-  return `data: ${data}\n\n`;
-}
+import { createUIMessageStream } from "ai"; // <- Vercel AI SDK UI stream
 
-export async function POST(request: Request) {
+export async function POST(req: Request) {
+  // Læs body (brugerbeskeder, hvis din chat sender dem)
   let body: any = {};
   try {
-    body = await request.json();
+    body = await req.json();
   } catch {
     body = {};
   }
 
-  // Forsøg at finde sidste brugerbesked (både parts[] og content)
+  // Find sidste brugerbesked på en robust måde (både content- og parts-formater)
   const last =
     (Array.isArray(body?.messages) && body.messages.length > 0
       ? String(body.messages.at(-1)?.content ?? "")
@@ -28,39 +26,54 @@ export async function POST(request: Request) {
           : "") || String(body?.message?.content ?? "")
       : "");
 
-  const reply =
-    `Hej! Jeg er på linjen og jeg virker ✅\n` +
-    (last ? `Du skrev: “${last}”.\n` : "") +
-    `Jeg streamer svaret via SSE (text/event-stream).`;
+  // Opret UI-streamen
+  const { stream, writer } = createUIMessageStream();
 
-  const encoder = new TextEncoder();
+  // Skriv svar asynkront, så vi kan returnere streamen med det samme
+  (async () => {
+    // Start en ny assistent-besked
+    writer.write({
+      type: "assistant-message",
+      id: crypto.randomUUID(),
+      role: "assistant",
+    });
 
-  const stream = new ReadableStream({
-    start(controller) {
-      // send i 2 små bidder for at demonstrere streaming
-      controller.enqueue(encoder.encode(sseLine("Hej Kim…")));
-      setTimeout(() => {
-        controller.enqueue(encoder.encode(sseLine(reply)));
-        // marker slut
-        controller.close();
-      }, 150);
-    },
-    cancel() {
-      // no-op
-    },
-  });
+    // Tekst “deltas” (kommer løbende — UI’et bygger boblen for dig)
+    writer.write({ type: "assistant-text-delta", text: "Hej! " });
+    writer.write({ type: "assistant-text-delta", text: "Jeg virker ✅" });
+
+    if (last) {
+      writer.write({
+        type: "assistant-text-delta",
+        text: ` — du skrev: “${last}”.`,
+      });
+    }
+
+    // Marker at assistentens besked er færdig
+    writer.write({ type: "assistant-message-finished" });
+
+    // (valgfrit) brug data-evt. – fint til usage osv.
+    writer.write({ type: "data", data: { ok: true } });
+
+    // VIGTIGT: sig at vi er helt færdige
+    writer.write({ type: "data-done" });
+
+    // Luk streamen (ellers forbliver UI’et i “Please wait…”)
+    writer.close();
+  })();
 
   return new Response(stream, {
     status: 200,
     headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
+      // AI SDK tjekker denne content-type for UI-stream
+      "Content-Type": "text/x-aiui-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
     },
   });
 }
 
-// (Valgfri) GET kan bare svare simpelt, så /api/chat kan pinges i browser
+// (valgfri) GET til ping
 export async function GET() {
-  return Response.json({ ok: true, note: "chat endpoint (SSE POST) alive" });
+  return Response.json({ ok: true, note: "chat UI-stream endpoint alive" });
 }
