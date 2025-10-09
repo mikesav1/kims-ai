@@ -1,9 +1,7 @@
 // app/api/chat/route.ts
 export const runtime = "edge";
 
-import { createUIMessageStream } from "ai";
-
-// Hjælper til at hente sidste bruger-tekst (uanset om du sender den som messages[] eller message.parts)
+// Læs evt. sidste bruger-tekst fra både messages[] eller message.parts
 function pickLastUserText(body: any): string {
   const fromList =
     Array.isArray(body?.messages) && body.messages.length > 0
@@ -30,35 +28,28 @@ export async function POST(req: Request) {
     (globalThis as any).crypto?.randomUUID?.() ??
     Math.random().toString(36).slice(2);
 
-  const stream = createUIMessageStream({
-    // VIGTIGT: Vi SKAL skrive mindst: start -> text-start -> text-delta -> text-end -> finish
-    async execute({ writer }) {
-      await writer.write({ type: "start" });
-      await writer.write({ type: "text-start", id });
+  // Manuelt UI-stream format: én JSON pr. linje
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      const send = (obj: any) =>
+        controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
 
-      await writer.write({
-        type: "text-delta",
-        id,
-        delta: "Hej! Jeg virker ✅",
-      });
-
+      // MINIMUM sekvens som useChat forventer
+      send({ type: "start" });
+      send({ type: "text-start", id });
+      send({ type: "text-delta", id, delta: "Hej! Jeg virker ✅" });
       if (last) {
-        await writer.write({
-          type: "text-delta",
-          id,
-          delta: ` – du skrev: “${last}”`,
-        });
+        send({ type: "text-delta", id, delta: ` – du skrev: “${last}”` });
       }
+      send({ type: "text-end", id });
+      send({ type: "finish" });
 
-      await writer.write({ type: "text-end", id });
-      await writer.write({ type: "finish" });
-
-      // Ingen writer.close() i denne SDK-version
-      return;
+      controller.close();
     },
   });
 
-  return new Response(stream as any, {
+  return new Response(stream, {
     status: 200,
     headers: {
       "Content-Type": "text/x-aiui-stream; charset=utf-8",
