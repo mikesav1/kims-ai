@@ -4,7 +4,7 @@ export const runtime = "edge";
 import { createUIMessageStream } from "ai";
 
 export async function POST(req: Request) {
-  // Læs body og find sidste brugerbesked uanset frontend-format
+  // Læs body og find sidste brugerbesked uanset format
   let body: any = {};
   try {
     body = await req.json();
@@ -25,20 +25,20 @@ export async function POST(req: Request) {
 
   const last = (lastFromList || lastFromParts || "").trim();
 
-  // Ét id for hele svaret (krævet af din SDK for text-delta)
+  // Ét id til hele svar-beskeden (krævet for text-delta events i denne SDK)
   const msgId =
     (globalThis as any).crypto?.randomUUID?.() ??
     Math.random().toString(36).slice(2);
 
   const stream = createUIMessageStream({
     async execute({ writer }) {
-      // Start stream
+      // 1) Start hele UI-streamen
       await writer.write({ type: "start" });
 
-      // Tekst starter (valgfri, men god praksis)
+      // 2) Start tekst for denne besked
       await writer.write({ type: "text-start", id: msgId });
 
-      // Selve teksten sendes som "text-delta" – med id
+      // 3) Send tekst som deltas (med id)
       await writer.write({
         type: "text-delta",
         id: msgId,
@@ -53,13 +53,14 @@ export async function POST(req: Request) {
         });
       }
 
-      // Afslut tekst for denne besked
+      // 4) Slut tekst for denne besked
       await writer.write({ type: "text-end", id: msgId });
 
-      // Hele UI-svaret er færdigt
+      // 5) Slut hele UI-streamen
       await writer.write({ type: "finish" });
 
-      await writer.close();
+      // VIGTIGT: ingen writer.close() i din SDK – streamen lukkes når execute returnerer
+      return;
     },
   });
 
