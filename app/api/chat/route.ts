@@ -4,7 +4,7 @@ export const runtime = "edge";
 import { createUIMessageStream } from "ai";
 
 export async function POST(req: Request) {
-  // ——— Parse body og find sidste brugerbesked ————————————————
+  // Parse body og find sidste brugerbesked (både useChat-format og din egen)
   let body: any = {};
   try {
     body = await req.json();
@@ -27,28 +27,22 @@ export async function POST(req: Request) {
 
   const last = (lastFromList || lastFromParts || "").trim();
 
-  // ——— Opret UI-stream med kun de godkendte event-typer ——————————
+  // Stream kun med events din SDK-version kender: start → text-delta → text-end → finish
   const stream = createUIMessageStream({
     async execute({ writer }) {
-      // 1) signalér start (nogle UI’er viser status-spinner på "start")
       await writer.write({ type: "start" });
 
-      // 2) send tekst som deltas
-      await writer.write({ type: "text-delta", text: "Hej! Jeg virker ✅" });
+      await writer.write({ type: "text-delta", delta: "Hej! Jeg virker ✅" });
       if (last) {
         await writer.write({
           type: "text-delta",
-          text: ` — du skrev: “${last}”.`,
+          delta: ` — du skrev: “${last}”.`,
         });
       }
 
-      // 3) afslut tekst
       await writer.write({ type: "text-end" });
-
-      // 4) og afslut hele svaret
       await writer.write({ type: "finish" });
 
-      // Luk streamen (ellers hænger UI’et på “Please wait…”)
       await writer.close();
     },
   });
