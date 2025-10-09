@@ -7,7 +7,7 @@ import { unstable_serialize } from "swr/infinite";
 
 import { ChatHeader } from "@/components/chat-header";
 import { MultimodalInput } from "./multimodal-input";
-import { Messages } from "./messages";
+import { Messages, type ChatStatus } from "./messages";
 import { Artifact } from "./artifact";
 import { useArtifactSelector } from "@/hooks/use-artifact";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
@@ -17,7 +17,7 @@ import type { VisibilityType } from "./visibility-selector";
 import { fetcher, generateUUID } from "@/lib/utils";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 
-/** Hjælper: lav en assistentbesked (uden createdAt/attachments) */
+/** Hjælper: lav en assistentbesked */
 function toAssistantMessage(text: string): ChatMessage {
   return {
     id: generateUUID(),
@@ -26,7 +26,7 @@ function toAssistantMessage(text: string): ChatMessage {
   } as ChatMessage;
 }
 
-/** Hjælper: konverter ChatMessage[] → API-format (role + content) */
+/** Hjælper: konverter ChatMessage[] → API-format */
 function serializeMessagesForApi(msgs: ChatMessage[]) {
   return msgs.map((m) => {
     const text =
@@ -63,15 +63,13 @@ export function Chat({
   const [input, setInput] = useState<string>("");
   const [status, setStatus] = useState<"idle" | "submitting">("idle");
 
-  // (valgfrit — behold for konsistens)
   useSWR(messages.length >= 2 ? `/api/vote?chatId=${id}` : null, fetcher);
 
-  /** Midlertidig debug-funktion: kalder /api/chat?mode=json */
+  // 🔹 Hjælpefunktion: send debug-request til dit API
   async function sendMessageDebug(userText: string) {
     if (!userText.trim()) return;
     setStatus("submitting");
 
-    // 1) Tilføj brugerbesked lokalt
     const userMsg: ChatMessage = {
       id: generateUUID(),
       role: "user",
@@ -81,7 +79,6 @@ export function Chat({
     setMessages((prev) => [...prev, userMsg]);
 
     try {
-      // 2) Kald API i debug-mode
       const current = [...messages, userMsg];
       const payload = {
         id,
@@ -98,18 +95,17 @@ export function Chat({
         body: JSON.stringify(payload),
       });
 
-      // 3) Læs svar og tilføj assistentbesked
       const data = await res.json().catch(() => ({} as any));
       const replyText: string =
         typeof data?.reply === "string"
           ? data.reply
-          : "Hej! (debug) – intet gyldigt svar fra serveren.";
+          : "Hej! (debug) – intet svar fra serveren.";
 
       setMessages((prev) => [...prev, toAssistantMessage(replyText)]);
     } catch (err) {
       setMessages((prev) => [
         ...prev,
-        toAssistantMessage("Ups – der skete en fejl i debug-kaldet."),
+        toAssistantMessage("Ups – der skete en fejl i forbindelsen."),
       ]);
     } finally {
       setStatus("idle");
@@ -117,7 +113,7 @@ export function Chat({
     }
   }
 
-  // Håndter evt. ?query=... i URL
+  // Hvis URL har ?query=, så send den automatisk
   const searchParams = useSearchParams();
   const query = searchParams.get("query");
   const hasHandledQueryRef = useRef(false);
@@ -129,14 +125,13 @@ export function Chat({
     }
   }, [query, id]);
 
-  // ✅ VIGTIGT: regenerate skal returnere Promise<void>
-  const regenerateAsync = async (_opts?: {
-    messageId?: string | undefined;
-    options?: unknown;
-  }): Promise<void> => {
-    // no-op for nu (kræver ingen implementation i debug-mode)
+  // ✅ Async regenerate (krævet af Messages)
+  const regenerateAsync = async (): Promise<void> => {
     return;
   };
+
+  // ✅ Konverter vores status til typen ChatStatus
+  const uiStatus: ChatStatus = status === "submitting" ? "loading" : "idle";
 
   return (
     <>
@@ -155,8 +150,8 @@ export function Chat({
           regenerate={regenerateAsync}
           selectedModelId={initialChatModel}
           setMessages={setMessages}
-          status={status}
-          votes={undefined}
+          status={uiStatus}
+          votes={[]}
         />
 
         <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4">
@@ -176,7 +171,7 @@ export function Chat({
               setAttachments={() => {}}
               setInput={setInput}
               setMessages={setMessages}
-              status={status}
+              status={uiStatus}
               stop={() => {}}
               usage={undefined}
             />
@@ -197,9 +192,9 @@ export function Chat({
         setAttachments={() => {}}
         setInput={setInput}
         setMessages={setMessages}
-        status={status}
+        status={uiStatus}
         stop={() => {}}
-        votes={undefined}
+        votes={[]}
       />
     </>
   );
