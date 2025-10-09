@@ -129,6 +129,15 @@ export function Chat({
     }
   }, [query, id]);
 
+  // ✅ VIGTIGT: regenerate skal returnere Promise<void>
+  const regenerateAsync = async (_opts?: {
+    messageId?: string | undefined;
+    options?: unknown;
+  }): Promise<void> => {
+    // no-op for nu (kræver ingen implementation i debug-mode)
+    return;
+  };
+
   return (
     <>
       <div className="overscroll-behavior-contain flex h-dvh min-w-0 touch-pan-y flex-col bg-background">
@@ -143,7 +152,7 @@ export function Chat({
           isArtifactVisible={isArtifactVisible}
           isReadonly={isReadonly}
           messages={messages}
-          regenerate={() => {}}
+          regenerate={regenerateAsync}   {/* <- async Promise<void> */}
           selectedModelId={initialChatModel}
           setMessages={setMessages}
           status={status}
@@ -153,7 +162,7 @@ export function Chat({
         <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4">
           {!isReadonly && (
             <MultimodalInput
-              attachments={[]} // ikke i brug nu
+              attachments={[]}
               chatId={id}
               input={input}
               messages={messages}
@@ -176,12 +185,12 @@ export function Chat({
       </div>
 
       <Artifact
-        attachments={[]} // placeholder
+        attachments={[]}
         chatId={id}
         input={input}
         isReadonly={isReadonly}
         messages={messages}
-        regenerate={() => {}}
+        regenerate={regenerateAsync}
         selectedModelId={initialChatModel}
         selectedVisibilityType={visibilityType}
         sendMessage={async () => {}}
